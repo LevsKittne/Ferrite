@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/ferrite-loader", "crates/ferrite-setup"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/LevsKittne/Ferrite"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "allow"
+missing_safety_doc = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+[profile.release]
+opt-level = "s"
+codegen-units = 1
+lto = true
+panic = "unwind"
+strip = true

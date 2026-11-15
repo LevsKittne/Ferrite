@@ -1,0 +1,20 @@
+[package]
+name = "ferrite-loader"
+description = "Native bootstrap and mod runtime core for Unity Mono games"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "version"
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Environment", "Win32_Storage_FileSystem", "Win32_Security"] }
+
+[lints]
+workspace = true
