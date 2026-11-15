@@ -28,16 +28,9 @@ const FILES: &[(&str, &[u8])] = payload! {
 
 fn main() {
     let t = text();
-    let game = match find_game(t.pick) {
-        Some(Game::Mono(dir)) => dir,
-        Some(Game::Il2Cpp(dir)) => {
-            error(TITLE, &fill(t.il2cpp, &[&dir.display().to_string()]));
-            return;
-        }
-        None => {
-            error(TITLE, t.not_found);
-            return;
-        }
+    let Some(Game::Mono(game) | Game::Il2Cpp(game)) = find_game(t.pick) else {
+        error(TITLE, t.not_found);
+        return;
     };
     let update = game
         .join("Ferrite")

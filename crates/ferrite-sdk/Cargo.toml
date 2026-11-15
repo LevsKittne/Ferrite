@@ -1,0 +1,13 @@
+[package]
+name = "ferrite-sdk"
+description = "SDK for writing Ferrite mods in Rust for Unity IL2CPP games"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

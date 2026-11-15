@@ -1,8 +1,12 @@
 mod config;
+mod deps;
+mod detour;
 mod iat;
+mod il2cpp;
 mod log;
 mod mods;
 mod mono;
+mod native;
 mod proxy;
 mod sys;
 
@@ -27,6 +31,7 @@ const ROOT_DIR: &str = "Ferrite";
 const API_NAMESPACE: &str = "Ferrite";
 
 type JitInit = unsafe extern "C" fn(*const c_char, *const c_char) -> Ptr;
+type Il2CppInit = unsafe extern "C" fn(*const c_char) -> i32;
 
 #[derive(Debug)]
 struct Setup {
@@ -48,6 +53,8 @@ static SETUP: OnceLock<Setup> = OnceLock::new();
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static ORIGINAL_JIT_INIT: AtomicUsize = AtomicUsize::new(0);
 static MONO_MODULE: AtomicUsize = AtomicUsize::new(0);
+static ORIGINAL_IL2CPP_INIT: AtomicUsize = AtomicUsize::new(0);
+static IL2CPP_MODULE: AtomicUsize = AtomicUsize::new(0);
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllMain(
@@ -139,13 +146,43 @@ unsafe extern "system" fn get_proc_address_hook(module: HMODULE, name: *const u8
         MONO_MODULE.store(module as usize, Ordering::SeqCst);
         return jit_init_hook as *mut c_void;
     }
+    if unsafe { sys::c_bytes(name) } == b"il2cpp_init" {
+        ORIGINAL_IL2CPP_INIT.store(real as usize, Ordering::SeqCst);
+        IL2CPP_MODULE.store(module as usize, Ordering::SeqCst);
+        return il2cpp_init_hook as *mut c_void;
+    }
     real
 }
 
-unsafe extern "C" fn jit_init_hook(root: *const c_char, runtime: *const c_char) -> Ptr {
+fn open_console() {
     if SETUP.get().is_some_and(|s| s.config.loader.console) {
         log::open_console(&format!("{} - Ferrite {VERSION}", game_name()));
     }
+}
+
+unsafe extern "C" fn il2cpp_init_hook(domain_name: *const c_char) -> i32 {
+    open_console();
+    let original: Il2CppInit = unsafe {
+        std::mem::transmute::<usize, Il2CppInit>(ORIGINAL_IL2CPP_INIT.load(Ordering::SeqCst))
+    };
+    let result = unsafe { original(domain_name) };
+    let booted = catch_unwind(|| {
+        let Some(setup) = SETUP.get() else { return };
+        info!("IL2CPP runtime initialized");
+        il2cpp::boot(
+            IL2CPP_MODULE.load(Ordering::SeqCst) as HMODULE,
+            setup.root.join("mods"),
+            setup.config.mods.disabled.clone(),
+        );
+    });
+    if booted.is_err() {
+        error!("IL2CPP boot panicked");
+    }
+    result
+}
+
+unsafe extern "C" fn jit_init_hook(root: *const c_char, runtime: *const c_char) -> Ptr {
+    open_console();
     let original: JitInit =
         unsafe { std::mem::transmute::<usize, JitInit>(ORIGINAL_JIT_INIT.load(Ordering::SeqCst)) };
     let domain = unsafe { original(root, runtime) };

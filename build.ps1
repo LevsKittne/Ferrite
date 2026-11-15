@@ -13,9 +13,10 @@ $setup = Join-Path $dist "setup"
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 New-Item -ItemType Directory -Force $core, $examples, $setup | Out-Null
 
-cargo build --release --manifest-path (Join-Path $root "Cargo.toml") -p ferrite-loader
+cargo build --release --manifest-path (Join-Path $root "Cargo.toml") -p ferrite-loader -p hello-native
 if ($LASTEXITCODE -ne 0) { throw "ferrite-loader build failed" }
 Copy-Item (Join-Path $root "target\release\version.dll") $dist
+Copy-Item (Join-Path $root "target\release\hello_native.dll") $examples
 
 function Build($proj, $out) {
     dotnet build (Join-Path $root $proj) -c Release "-p:GameDir=$GameDir" -o (Join-Path $root $out)

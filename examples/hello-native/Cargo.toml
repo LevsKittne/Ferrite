@@ -1,0 +1,17 @@
+[package]
+name = "hello-native"
+description = "Example Ferrite mod for IL2CPP games, written in Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ferrite-sdk = { path = "../../crates/ferrite-sdk" }
+
+[lints]
+workspace = true

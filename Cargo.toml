@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ferrite-loader", "crates/ferrite-setup"]
+members = ["crates/ferrite-loader", "crates/ferrite-sdk", "crates/ferrite-setup", "examples/hello-native"]
 
 [workspace.package]
 version = "0.1.0"

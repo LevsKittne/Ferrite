@@ -4,7 +4,6 @@ use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 pub struct Text {
     pub not_found: &'static str,
     pub pick: &'static str,
-    pub il2cpp: &'static str,
     pub write_failed: &'static str,
     pub loader_done: &'static str,
     pub installed: &'static str,
@@ -39,7 +38,6 @@ pub fn fill(template: &str, args: &[&str]) -> String {
 const EN: Text = Text {
     not_found: "No Unity game found.\n\nPut the installer into the game folder (next to the game's .exe) and run it again, or pick the game folder when asked.",
     pick: "Select the game folder (the one with the game's .exe)",
-    il2cpp: "This game uses IL2CPP:\n{0}\n\nFerrite supports only Unity games that run on Mono.",
     write_failed: "Could not write files:\n{0}\n\nClose the game and try again. If that does not help, run the installer as administrator.",
     loader_done: "Ferrite {0}.\n\nGame folder:\n{1}\n\nPut mods into Ferrite\\mods.\nThe installer will now delete itself.",
     installed: "installed",
@@ -49,7 +47,6 @@ const EN: Text = Text {
 const RU: Text = Text {
     not_found: "Unity-игра не найдена.\n\nПоложите установщик в папку игры (рядом с .exe игры) и запустите снова или выберите папку игры, когда установщик спросит.",
     pick: "Выберите папку игры (ту, где лежит .exe игры)",
-    il2cpp: "Эта игра использует IL2CPP:\n{0}\n\nFerrite поддерживает только Unity-игры на Mono.",
     write_failed: "Не удалось записать файлы:\n{0}\n\nЗакройте игру и попробуйте снова. Если не помогло — запустите установщик от имени администратора.",
     loader_done: "Ferrite {0}.\n\nПапка игры:\n{1}\n\nМоды кладите в Ferrite\\mods.\nУстановщик сейчас удалится.",
     installed: "установлен",
@@ -59,7 +56,6 @@ const RU: Text = Text {
 const UK: Text = Text {
     not_found: "Unity-гру не знайдено.\n\nПокладіть інсталятор у папку гри (поруч із .exe гри) і запустіть знову або виберіть папку гри, коли інсталятор запитає.",
     pick: "Виберіть папку гри (ту, де лежить .exe гри)",
-    il2cpp: "Ця гра використовує IL2CPP:\n{0}\n\nFerrite підтримує лише Unity-ігри на Mono.",
     write_failed: "Не вдалося записати файли:\n{0}\n\nЗакрийте гру і спробуйте ще раз. Якщо не допомогло — запустіть інсталятор від імені адміністратора.",
     loader_done: "Ferrite {0}.\n\nПапка гри:\n{1}\n\nМоди кладіть у Ferrite\\mods.\nІнсталятор зараз видалиться.",
     installed: "встановлено",
@@ -69,7 +65,6 @@ const UK: Text = Text {
 const ZH: Text = Text {
     not_found: "未找到 Unity 游戏。\n\n请将安装程序放入游戏文件夹（与游戏 .exe 同目录）后重新运行，或在提示时选择游戏文件夹。",
     pick: "请选择游戏文件夹（包含游戏 .exe 的文件夹）",
-    il2cpp: "该游戏使用 IL2CPP：\n{0}\n\nFerrite 仅支持基于 Mono 的 Unity 游戏。",
     write_failed: "无法写入文件：\n{0}\n\n请关闭游戏后重试。如果仍然失败，请以管理员身份运行安装程序。",
     loader_done: "Ferrite {0}。\n\n游戏文件夹：\n{1}\n\n请将模组放入 Ferrite\\mods。\n安装程序将自动删除。",
     installed: "已安装",
@@ -79,7 +74,6 @@ const ZH: Text = Text {
 const ES: Text = Text {
     not_found: "No se encontró ningún juego de Unity.\n\nColoca el instalador en la carpeta del juego (junto al .exe del juego) y ejecútalo de nuevo, o elige la carpeta del juego cuando se te pida.",
     pick: "Selecciona la carpeta del juego (la que contiene el .exe del juego)",
-    il2cpp: "Este juego usa IL2CPP:\n{0}\n\nFerrite solo es compatible con juegos de Unity que usan Mono.",
     write_failed: "No se pudieron escribir los archivos:\n{0}\n\nCierra el juego e inténtalo de nuevo. Si no funciona, ejecuta el instalador como administrador.",
     loader_done: "Ferrite {0}.\n\nCarpeta del juego:\n{1}\n\nPon los mods en Ferrite\\mods.\nEl instalador se eliminará ahora.",
     installed: "instalado",
@@ -89,7 +83,6 @@ const ES: Text = Text {
 const PT: Text = Text {
     not_found: "Nenhum jogo Unity encontrado.\n\nColoque o instalador na pasta do jogo (ao lado do .exe do jogo) e execute-o novamente, ou escolha a pasta do jogo quando solicitado.",
     pick: "Selecione a pasta do jogo (a que contém o .exe do jogo)",
-    il2cpp: "Este jogo usa IL2CPP:\n{0}\n\nO Ferrite é compatível apenas com jogos Unity que usam Mono.",
     write_failed: "Não foi possível gravar os arquivos:\n{0}\n\nFeche o jogo e tente novamente. Se não resolver, execute o instalador como administrador.",
     loader_done: "Ferrite {0}.\n\nPasta do jogo:\n{1}\n\nColoque os mods em Ferrite\\mods.\nO instalador será excluído agora.",
     installed: "instalado",
@@ -99,7 +92,6 @@ const PT: Text = Text {
 const DE: Text = Text {
     not_found: "Kein Unity-Spiel gefunden.\n\nLege den Installer in den Spielordner (neben die .exe des Spiels) und starte ihn erneut, oder wähle den Spielordner, wenn du gefragt wirst.",
     pick: "Wähle den Spielordner (den mit der .exe des Spiels)",
-    il2cpp: "Dieses Spiel verwendet IL2CPP:\n{0}\n\nFerrite unterstützt nur Unity-Spiele mit Mono.",
     write_failed: "Dateien konnten nicht geschrieben werden:\n{0}\n\nSchließe das Spiel und versuche es erneut. Falls das nicht hilft, starte den Installer als Administrator.",
     loader_done: "Ferrite {0}.\n\nSpielordner:\n{1}\n\nMods kommen in Ferrite\\mods.\nDer Installer löscht sich jetzt selbst.",
     installed: "installiert",
@@ -109,7 +101,6 @@ const DE: Text = Text {
 const FR: Text = Text {
     not_found: "Aucun jeu Unity trouvé.\n\nPlacez l'installateur dans le dossier du jeu (à côté du .exe du jeu) et relancez-le, ou choisissez le dossier du jeu lorsqu'il vous est demandé.",
     pick: "Choisissez le dossier du jeu (celui qui contient le .exe du jeu)",
-    il2cpp: "Ce jeu utilise IL2CPP :\n{0}\n\nFerrite ne prend en charge que les jeux Unity basés sur Mono.",
     write_failed: "Impossible d'écrire les fichiers :\n{0}\n\nFermez le jeu et réessayez. Si cela ne suffit pas, lancez l'installateur en tant qu'administrateur.",
     loader_done: "Ferrite {0}.\n\nDossier du jeu :\n{1}\n\nPlacez les mods dans Ferrite\\mods.\nL'installateur va maintenant se supprimer.",
     installed: "installé",
@@ -119,7 +110,6 @@ const FR: Text = Text {
 const JA: Text = Text {
     not_found: "Unity ゲームが見つかりません。\n\nインストーラーをゲームフォルダー（ゲームの .exe と同じ場所）に置いてもう一度実行するか、表示されたらゲームフォルダーを選択してください。",
     pick: "ゲームフォルダー（ゲームの .exe があるフォルダー）を選択してください",
-    il2cpp: "このゲームは IL2CPP を使用しています：\n{0}\n\nFerrite は Mono で動作する Unity ゲームのみに対応しています。",
     write_failed: "ファイルを書き込めませんでした：\n{0}\n\nゲームを終了してからもう一度お試しください。解決しない場合は、管理者としてインストーラーを実行してください。",
     loader_done: "Ferrite を{0}。\n\nゲームフォルダー：\n{1}\n\nMOD は Ferrite\\mods に置いてください。\nインストーラーは自動的に削除されます。",
     installed: "インストールしました",
@@ -129,7 +119,6 @@ const JA: Text = Text {
 const KO: Text = Text {
     not_found: "Unity 게임을 찾을 수 없습니다.\n\n설치 프로그램을 게임 폴더(게임 .exe가 있는 곳)에 넣고 다시 실행하거나, 요청 시 게임 폴더를 선택하세요.",
     pick: "게임 폴더(게임 .exe가 있는 폴더)를 선택하세요",
-    il2cpp: "이 게임은 IL2CPP를 사용합니다:\n{0}\n\nFerrite는 Mono 기반 Unity 게임만 지원합니다.",
     write_failed: "파일을 쓸 수 없습니다:\n{0}\n\n게임을 종료하고 다시 시도하세요. 그래도 안 되면 관리자 권한으로 설치 프로그램을 실행하세요.",
     loader_done: "Ferrite가 {0}.\n\n게임 폴더:\n{1}\n\n모드는 Ferrite\\mods에 넣으세요.\n설치 프로그램은 이제 자동으로 삭제됩니다.",
     installed: "설치되었습니다",
@@ -139,7 +128,6 @@ const KO: Text = Text {
 const TR: Text = Text {
     not_found: "Unity oyunu bulunamadı.\n\nYükleyiciyi oyun klasörüne (oyunun .exe dosyasının yanına) koyup tekrar çalıştırın veya istendiğinde oyun klasörünü seçin.",
     pick: "Oyun klasörünü seçin (oyunun .exe dosyasının bulunduğu klasör)",
-    il2cpp: "Bu oyun IL2CPP kullanıyor:\n{0}\n\nFerrite yalnızca Mono kullanan Unity oyunlarını destekler.",
     write_failed: "Dosyalar yazılamadı:\n{0}\n\nOyunu kapatıp tekrar deneyin. Sorun devam ederse yükleyiciyi yönetici olarak çalıştırın.",
     loader_done: "Ferrite {0}.\n\nOyun klasörü:\n{1}\n\nModları Ferrite\\mods klasörüne koyun.\nYükleyici şimdi kendini silecek.",
     installed: "kuruldu",
@@ -149,7 +137,6 @@ const TR: Text = Text {
 const PL: Text = Text {
     not_found: "Nie znaleziono gry Unity.\n\nUmieść instalator w folderze gry (obok pliku .exe gry) i uruchom go ponownie albo wybierz folder gry, gdy instalator o to poprosi.",
     pick: "Wybierz folder gry (ten z plikiem .exe gry)",
-    il2cpp: "Ta gra używa IL2CPP:\n{0}\n\nFerrite obsługuje tylko gry Unity działające na Mono.",
     write_failed: "Nie udało się zapisać plików:\n{0}\n\nZamknij grę i spróbuj ponownie. Jeśli to nie pomoże, uruchom instalator jako administrator.",
     loader_done: "Ferrite {0}.\n\nFolder gry:\n{1}\n\nMody umieszczaj w Ferrite\\mods.\nInstalator zaraz się usunie.",
     installed: "zainstalowany",
