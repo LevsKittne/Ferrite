@@ -26,7 +26,7 @@ impl Context {
     #[must_use]
     pub unsafe fn from_raw(api: *const abi::Api, handle: abi::Handle) -> Option<Self> {
         let api = unsafe { api.as_ref() }?;
-        (api.abi == abi::ABI_VERSION).then_some(Self { api, handle })
+        (api.abi >= abi::ABI_VERSION).then_some(Self { api, handle })
     }
 
     pub fn log(&self, level: i32, message: &str) {
@@ -58,8 +58,88 @@ impl Context {
 
     #[must_use]
     pub unsafe fn hook(&self, target: *mut c_void, detour: *mut c_void) -> Option<*mut c_void> {
-        let trampoline = unsafe { (self.api.hook)(target, detour) };
+        let trampoline = unsafe { (self.api.hook_owned)(self.handle, target, detour) };
         (!trampoline.is_null()).then_some(trampoline)
+    }
+
+    pub unsafe fn unhook(&self, target: *mut c_void) -> bool {
+        unsafe { (self.api.unhook)(self.handle, target) }
+    }
+
+    #[must_use]
+    pub unsafe fn hook_method(
+        &self,
+        namespace: &str,
+        class: &str,
+        method: &str,
+        args: i32,
+        detour: *mut c_void,
+    ) -> Option<*mut c_void> {
+        let target = self
+            .il2cpp()?
+            .find_method(namespace, class, method, args)?
+            .pointer();
+        if target.is_null() {
+            return None;
+        }
+        unsafe { self.hook(target, detour) }
+    }
+
+    pub unsafe fn replace_method(
+        &self,
+        method: il2cpp::Method,
+        replacement: *mut c_void,
+    ) -> *mut c_void {
+        let slots = method.0.cast::<*mut c_void>();
+        let previous = unsafe { slots.read() };
+        let virtual_slot = unsafe { slots.add(1) };
+        let same = unsafe { virtual_slot.read() } == previous;
+        unsafe { (self.api.patch_pointer)(self.handle, slots, replacement) };
+        if same {
+            unsafe { (self.api.patch_pointer)(self.handle, virtual_slot, replacement) };
+        }
+        previous
+    }
+
+    pub fn execute(&self, line: &str) {
+        unsafe { (self.api.execute)(line.as_ptr(), line.len()) };
+    }
+
+    fn directory(&self, kind: i32) -> std::path::PathBuf {
+        let mut buffer = vec![0u8; 512];
+        loop {
+            let len = unsafe {
+                (self.api.directory)(self.handle, kind, buffer.as_mut_ptr(), buffer.len())
+            };
+            let Ok(len) = usize::try_from(len) else {
+                return std::path::PathBuf::new();
+            };
+            if len <= buffer.len() {
+                buffer.truncate(len);
+                return String::from_utf8_lossy(&buffer).into_owned().into();
+            }
+            buffer.resize(len, 0);
+        }
+    }
+
+    #[must_use]
+    pub fn root_dir(&self) -> std::path::PathBuf {
+        self.directory(abi::DIR_ROOT)
+    }
+
+    #[must_use]
+    pub fn game_dir(&self) -> std::path::PathBuf {
+        self.directory(abi::DIR_GAME)
+    }
+
+    #[must_use]
+    pub fn mod_dir(&self) -> std::path::PathBuf {
+        self.directory(abi::DIR_MOD)
+    }
+
+    #[must_use]
+    pub fn config_dir(&self) -> std::path::PathBuf {
+        self.directory(abi::DIR_CONFIG)
     }
 
     #[must_use]
@@ -119,6 +199,25 @@ impl Context {
         }
         self.config_set(key, &fallback);
         fallback
+    }
+
+    #[must_use]
+    pub fn config<T: ConfigValue>(&self, key: &str, fallback: T, description: &str) -> T {
+        let value = self.config_get(key, fallback);
+        self.config_describe(key, description);
+        value
+    }
+
+    pub fn config_describe(&self, key: &str, description: &str) {
+        unsafe {
+            (self.api.config_describe)(
+                self.handle,
+                key.as_ptr(),
+                key.len(),
+                description.as_ptr(),
+                description.len(),
+            );
+        }
     }
 
     pub fn config_set<T: ConfigValue>(&self, key: &str, value: &T) {
@@ -217,6 +316,10 @@ pub trait Mod: Send + 'static {
     fn update(&mut self, _ctx: &Context) {}
 
     fn scene_loaded(&mut self, _ctx: &Context, _scene: &str) {}
+
+    fn config_changed(&mut self, _ctx: &Context) {}
+
+    fn unload(&mut self, _ctx: &Context) {}
 }
 
 #[doc(hidden)]
@@ -250,6 +353,20 @@ pub mod runtime {
     pub unsafe fn scene<M: Mod>(state: &Mutex<Option<M>>, name: *const u8, len: usize) {
         let name = unsafe { str_from_raw(name, len) }.to_owned();
         with(state, |m, ctx| m.scene_loaded(ctx, &name));
+    }
+
+    pub fn config_changed<M: Mod>(state: &Mutex<Option<M>>) {
+        with(state, super::Mod::config_changed);
+    }
+
+    pub fn unload<M: Mod>(state: &Mutex<Option<M>>) {
+        with(state, super::Mod::unload);
+        *state.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *CONTEXT.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        super::COMMANDS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
     }
 
     fn with<M: Mod>(state: &Mutex<Option<M>>, f: impl FnOnce(&mut M, &Context)) {
@@ -292,6 +409,16 @@ macro_rules! export_mod {
         #[unsafe(no_mangle)]
         pub extern "C" fn ferrite_mod_update() {
             $crate::runtime::update::<$ty>(&FERRITE_STATE);
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn ferrite_mod_config_changed() {
+            $crate::runtime::config_changed::<$ty>(&FERRITE_STATE);
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn ferrite_mod_unload() {
+            $crate::runtime::unload::<$ty>(&FERRITE_STATE);
         }
 
         #[unsafe(no_mangle)]

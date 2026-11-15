@@ -14,8 +14,8 @@ namespace HelloMod {
 
         public override void OnLoad() {
             Instance = this;
-            greeting = Config.Get("greeting", "Hello from Ferrite!");
-            overlay = Config.Get("overlay", false);
+            greeting = Config.Get("greeting", "Hello from Ferrite!", "Text printed on load and by the hello command.");
+            overlay = Config.Get("overlay", false, "Shows a label in the top-left corner. F8 toggles it.");
             Harmony.PatchAll(typeof(HelloMod).Assembly);
             Commands.Register("hello", "Prints the greeting or sets a new one.", args => {
                 if (args.Length > 0) {
@@ -24,7 +24,19 @@ namespace HelloMod {
                 }
                 Commands.Print(greeting);
             }, "[text]");
-            Logger.Info($"{greeting} Type `hello` in the Ferrite console, F8 toggles the overlay.");
+            var marker = System.Type.GetType("Ferrite.PatchedByHelloPatcher, Assembly-CSharp");
+            Logger.Info(marker != null ? "Assembly-CSharp was patched by HelloPatcher" : "HelloPatcher is not installed");
+            Logger.Info($"[build 4] {greeting} Type `hello` in the Ferrite console, F8 toggles the overlay.");
+        }
+
+        public override void OnConfigChanged() {
+            greeting = Config.Get("greeting", greeting);
+            overlay = Config.Get("overlay", overlay);
+            Logger.Info($"config changed: greeting = {greeting}, overlay = {overlay}");
+        }
+
+        public override void OnUnload() {
+            Logger.Info("v2 unloading, Harmony patches and commands are removed by Ferrite");
         }
 
         public override void OnSceneLoaded(Scene loaded, LoadSceneMode mode) {

@@ -63,6 +63,9 @@ api! {
     add_internal_call: fn(*const c_char, *const c_void);
     thread_current: fn() -> Ptr;
     thread_set_main: fn(Ptr);
+    image_open_from_data_with_name: fn(*mut c_char, u32, c_int, *mut c_int, c_int, *const c_char) -> Ptr;
+    assembly_load_from_full: fn(Ptr, *const c_char, *mut c_int, c_int) -> Ptr;
+    image_addref: fn(Ptr);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +76,48 @@ impl Mono {
         if let Ok(name) = CString::new(name) {
             unsafe { (self.add_internal_call)(name.as_ptr(), f) };
         }
+    }
+
+    pub fn assembly_image(&self, assembly: Ptr) -> Ptr {
+        unsafe { (self.assembly_get_image)(assembly) }
+    }
+
+    pub fn image_addref(&self, image: Ptr) {
+        unsafe { (self.image_addref)(image) };
+    }
+
+    pub unsafe fn bytes<'a>(&self, array: Ptr) -> &'a [u8] {
+        if array.is_null() {
+            return &[];
+        }
+        let len = unsafe { (self.array_length)(array) };
+        let data = unsafe { (self.array_addr_with_size)(array, 1, 0) }.cast::<u8>();
+        unsafe { std::slice::from_raw_parts(data, len) }
+    }
+
+    pub fn load_from_memory(&self, path: &str, data: &[u8]) -> Result<(Ptr, Ptr), String> {
+        let name = CString::new(path).map_err(|e| e.to_string())?;
+        let len = u32::try_from(data.len()).map_err(|e| e.to_string())?;
+        let mut status: c_int = 0;
+        let image = unsafe {
+            (self.image_open_from_data_with_name)(
+                data.as_ptr().cast_mut().cast(),
+                len,
+                1,
+                &raw mut status,
+                0,
+                name.as_ptr(),
+            )
+        };
+        if image.is_null() {
+            return Err(format!("image open failed with status {status}"));
+        }
+        let assembly =
+            unsafe { (self.assembly_load_from_full)(image, name.as_ptr(), &raw mut status, 0) };
+        if assembly.is_null() {
+            return Err(format!("assembly load failed with status {status}"));
+        }
+        Ok((assembly, image))
     }
 
     pub fn set_main_thread(&self) {

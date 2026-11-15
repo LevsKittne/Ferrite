@@ -1,24 +1,51 @@
 use crate::log::{error, info};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rule {
+    Required,
+    Optional,
+    Incompatible,
+    Process,
+}
 
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub id: String,
-    pub optional: bool,
+    pub rule: Rule,
+    pub min_version: Option<String>,
 }
 
 impl Dependency {
     pub fn parse(raw: &str) -> Self {
-        match raw.trim().strip_suffix('?') {
-            Some(id) => Self {
+        let raw = raw.trim();
+        if let Some(name) = raw.strip_prefix('!') {
+            return Self::plain(name, Rule::Incompatible);
+        }
+        if let Some(name) = raw.strip_prefix('@') {
+            return Self::plain(name, Rule::Process);
+        }
+        let (body, rule) = match raw.strip_suffix('?') {
+            Some(body) => (body, Rule::Optional),
+            None => (raw, Rule::Required),
+        };
+        match body.split_once(">=") {
+            Some((id, version)) => Self {
                 id: id.trim().to_owned(),
-                optional: true,
+                rule,
+                min_version: Some(version.trim().to_owned()).filter(|v| !v.is_empty()),
             },
-            None => Self {
-                id: raw.trim().to_owned(),
-                optional: false,
-            },
+            None => Self::plain(body, rule),
+        }
+    }
+
+    fn plain(id: &str, rule: Rule) -> Self {
+        Self {
+            id: id.trim().to_owned(),
+            rule,
+            min_version: None,
         }
     }
 
@@ -28,10 +55,40 @@ impl Dependency {
             .map(Self::parse)
             .collect()
     }
+
+    pub fn is_dependency(&self) -> bool {
+        matches!(self.rule, Rule::Required | Rule::Optional)
+    }
+}
+
+pub fn compare_versions(a: &str, b: &str) -> Ordering {
+    fn parts(v: &str) -> Vec<u64> {
+        v.trim()
+            .trim_start_matches(['v', 'V'])
+            .split(['.', '-', '+'])
+            .map_while(|p| {
+                let digits: String = p.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse().ok()
+            })
+            .collect()
+    }
+    let (a, b) = (parts(a), parts(b));
+    for i in 0..a.len().max(b.len()) {
+        let ord = a
+            .get(i)
+            .copied()
+            .unwrap_or(0)
+            .cmp(&b.get(i).copied().unwrap_or(0));
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    Ordering::Equal
 }
 
 pub trait Node: Clone {
     fn id(&self) -> &str;
+    fn version(&self) -> &str;
     fn dependencies(&self) -> &[Dependency];
     fn origin(&self) -> &Path;
 }
@@ -39,21 +96,42 @@ pub trait Node: Clone {
 #[derive(Debug)]
 pub struct Catalog<T> {
     disabled: HashSet<String>,
+    process: String,
     found: BTreeMap<String, T>,
 }
 
 impl<T: Node> Catalog<T> {
-    pub fn new(disabled: &[String]) -> Self {
+    pub fn new(disabled: &[String], process: &str) -> Self {
         Self {
             disabled: disabled.iter().map(|s| s.to_lowercase()).collect(),
+            process: process.to_lowercase(),
             found: BTreeMap::new(),
         }
+    }
+
+    fn runs_in_process(&self, node: &T) -> bool {
+        let mut filters = node
+            .dependencies()
+            .iter()
+            .filter(|d| d.rule == Rule::Process)
+            .peekable();
+        if filters.peek().is_none() || self.process.is_empty() {
+            return true;
+        }
+        filters.any(|d| {
+            let name = d.id.to_lowercase();
+            name.strip_suffix(".exe").unwrap_or(&name) == self.process
+        })
     }
 
     pub fn add(&mut self, node: T) -> bool {
         let key = node.id().to_lowercase();
         if self.disabled.contains(&key) {
             info!("skipping disabled mod {}", node.id());
+            return false;
+        }
+        if !self.runs_in_process(&node) {
+            info!("skipping {}: not meant for this game", node.id());
             return false;
         }
         if let Some(previous) = self.found.get(&key) {
@@ -78,6 +156,24 @@ impl<T: Node> Catalog<T> {
         out
     }
 
+    fn problem(&self, node: &T, dep: &Dependency) -> Option<String> {
+        let found = self.found.get(&dep.id.to_lowercase());
+        match dep.rule {
+            Rule::Incompatible => found.map(|_| format!("incompatible with {}", dep.id)),
+            Rule::Process => None,
+            Rule::Required | Rule::Optional => {
+                let Some(other) = found else {
+                    return (dep.rule == Rule::Required)
+                        .then(|| format!("dependency {} is missing", dep.id));
+                };
+                let min = dep.min_version.as_deref()?;
+                (compare_versions(other.version(), min) == Ordering::Less)
+                    .then(|| format!("needs {} {min} or newer, found {}", dep.id, other.version()))
+            }
+        }
+        .filter(|_| node.id() != dep.id)
+    }
+
     fn visit(&self, key: &str, marks: &mut HashMap<String, Mark>, out: &mut Vec<T>) -> bool {
         match marks.get(key) {
             Some(Mark::Done) => return true,
@@ -93,14 +189,18 @@ impl<T: Node> Catalog<T> {
         };
         marks.insert(key.to_owned(), Mark::Visiting);
         for dep in node.dependencies() {
+            if let Some(problem) = self.problem(node, dep) {
+                error!("{} skipped: {problem}", node.id());
+                marks.insert(key.to_owned(), Mark::Failed);
+                return false;
+            }
+            if !dep.is_dependency() {
+                continue;
+            }
             let dep_key = dep.id.to_lowercase();
-            let ok = self.found.contains_key(&dep_key) && self.visit(&dep_key, marks, out);
-            if !ok && !dep.optional {
-                error!(
-                    "{} skipped: dependency {} is missing or failed",
-                    node.id(),
-                    dep.id
-                );
+            let ok = !self.found.contains_key(&dep_key) || self.visit(&dep_key, marks, out);
+            if !ok && dep.rule == Rule::Required {
+                error!("{} skipped: dependency {} failed", node.id(), dep.id);
                 marks.insert(key.to_owned(), Mark::Failed);
                 return false;
             }
@@ -143,12 +243,14 @@ pub fn dlls(dir: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Catalog, Dependency, Node};
+    use super::{Catalog, Dependency, Node, Rule, compare_versions};
+    use std::cmp::Ordering;
     use std::path::{Path, PathBuf};
 
     #[derive(Debug, Clone)]
     struct Fake {
         id: String,
+        version: String,
         deps: Vec<Dependency>,
         origin: PathBuf,
     }
@@ -156,6 +258,9 @@ mod tests {
     impl Node for Fake {
         fn id(&self) -> &str {
             &self.id
+        }
+        fn version(&self) -> &str {
+            &self.version
         }
         fn dependencies(&self) -> &[Dependency] {
             &self.deps
@@ -166,8 +271,13 @@ mod tests {
     }
 
     fn fake(id: &str, deps: &str) -> Fake {
+        versioned(id, "1.0.0", deps)
+    }
+
+    fn versioned(id: &str, version: &str, deps: &str) -> Fake {
         Fake {
             id: id.to_owned(),
+            version: version.to_owned(),
             deps: Dependency::parse_list(deps),
             origin: PathBuf::from(format!("{id}.dll")),
         }
@@ -179,7 +289,7 @@ mod tests {
 
     #[test]
     fn dependencies_load_first() {
-        let mut c = Catalog::new(&[]);
+        let mut c = Catalog::new(&[], "");
         c.add(fake("a", "b"));
         c.add(fake("b", "c"));
         c.add(fake("c", ""));
@@ -188,7 +298,7 @@ mod tests {
 
     #[test]
     fn missing_required_dependency_skips_mod() {
-        let mut c = Catalog::new(&[]);
+        let mut c = Catalog::new(&[], "");
         c.add(fake("a", "missing"));
         c.add(fake("b", ""));
         assert_eq!(ids(&c), ["b"]);
@@ -196,14 +306,14 @@ mod tests {
 
     #[test]
     fn missing_optional_dependency_is_ignored() {
-        let mut c = Catalog::new(&[]);
+        let mut c = Catalog::new(&[], "");
         c.add(fake("a", "missing?"));
         assert_eq!(ids(&c), ["a"]);
     }
 
     #[test]
     fn cycle_skips_both() {
-        let mut c = Catalog::new(&[]);
+        let mut c = Catalog::new(&[], "");
         c.add(fake("a", "b"));
         c.add(fake("b", "a"));
         c.add(fake("c", ""));
@@ -212,7 +322,7 @@ mod tests {
 
     #[test]
     fn disabled_and_duplicates_are_rejected() {
-        let mut c = Catalog::new(&["Off".to_owned()]);
+        let mut c = Catalog::new(&["Off".to_owned()], "");
         assert!(!c.add(fake("off", "")));
         assert!(c.add(fake("x", "")));
         assert!(!c.add(fake("X", "")));
@@ -221,7 +331,7 @@ mod tests {
 
     #[test]
     fn dependents_of_failed_mods_fail() {
-        let mut c = Catalog::new(&[]);
+        let mut c = Catalog::new(&[], "");
         c.add(fake("a", "b"));
         c.add(fake("b", "missing"));
         assert_eq!(ids(&c), [] as [std::string::String; 0]);
@@ -232,8 +342,53 @@ mod tests {
         let deps = Dependency::parse_list(" core , extra? ,");
         assert_eq!(deps.len(), 2);
         assert_eq!(deps[0].id, "core");
-        assert!(!deps[0].optional);
+        assert_eq!(deps[0].rule, Rule::Required);
         assert_eq!(deps[1].id, "extra");
-        assert!(deps[1].optional);
+        assert_eq!(deps[1].rule, Rule::Optional);
+    }
+
+    #[test]
+    fn minimum_version_is_enforced() {
+        let mut c = Catalog::new(&[], "");
+        c.add(versioned("lib", "1.4.2", ""));
+        c.add(fake("new", "lib>=1.5"));
+        c.add(fake("old", "lib>=1.4.0"));
+        c.add(fake("soft", "lib>=2.0?"));
+        assert_eq!(ids(&c), ["lib", "old"]);
+    }
+
+    #[test]
+    fn incompatible_mods_are_skipped() {
+        let mut c = Catalog::new(&[], "");
+        c.add(fake("a", "!b"));
+        c.add(fake("b", ""));
+        c.add(fake("c", "!absent"));
+        assert_eq!(ids(&c), ["b", "c"]);
+    }
+
+    #[test]
+    fn process_filter() {
+        let mut c = Catalog::new(&[], "Game");
+        assert!(c.add(fake("here", "@game.exe")));
+        assert!(!c.add(fake("there", "@Other")));
+        assert!(c.add(fake("any", "")));
+        assert_eq!(ids(&c), ["any", "here"]);
+    }
+
+    #[test]
+    fn compares_versions() {
+        assert_eq!(compare_versions("1.10", "1.9"), Ordering::Greater);
+        assert_eq!(compare_versions("v2.0.0", "2"), Ordering::Equal);
+        assert_eq!(compare_versions("1.2.3-beta", "1.2.4"), Ordering::Less);
+    }
+
+    #[test]
+    fn parses_rules() {
+        let deps = Dependency::parse_list("a>=1.2?, !b, @Game");
+        assert_eq!(deps[0].rule, Rule::Optional);
+        assert_eq!(deps[0].min_version.as_deref(), Some("1.2"));
+        assert_eq!(deps[1].rule, Rule::Incompatible);
+        assert_eq!(deps[2].rule, Rule::Process);
+        assert_eq!(deps[2].id, "Game");
     }
 }

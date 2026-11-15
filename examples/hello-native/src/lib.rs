@@ -53,7 +53,11 @@ fn hook_canvas(ctx: &Context) {
 
 impl Mod for HelloNative {
     fn load(ctx: &Context) -> Self {
-        let greeting: String = ctx.config_get("greeting", "Hello from Rust!".to_owned());
+        let greeting: String = ctx.config(
+            "greeting",
+            "Hello from Rust!".to_owned(),
+            "Text printed on load and by the hello command.",
+        );
         match ctx.il2cpp() {
             Some(il2cpp) if unity_log(&il2cpp, &format!("[Hello Native] {greeting}")) => {
                 ctx.info(&format!("{greeting} Also written to the game's Unity log."));
@@ -108,6 +112,16 @@ impl Mod for HelloNative {
 
     fn scene_loaded(&mut self, ctx: &Context, scene: &str) {
         ctx.info(&format!("scene {scene} loaded"));
+    }
+
+    fn config_changed(&mut self, ctx: &Context) {
+        let greeting: String = ctx.config_get("greeting", "Hello from Rust!".to_owned());
+        ctx.info(&format!("config changed, greeting is now: {greeting}"));
+    }
+
+    fn unload(&mut self, ctx: &Context) {
+        CANVAS_ORIGINAL.store(0, Ordering::Release);
+        ctx.info("unloading, hooks are removed by Ferrite");
     }
 }
 

@@ -10,6 +10,8 @@ namespace Ferrite {
         public readonly string Version;
         public string Author;
         public string[] Dependencies;
+        public string[] Incompatibilities;
+        public string[] Processes;
 
         public ModAttribute(string id, string name, string version) {
             Id = id;
@@ -27,6 +29,15 @@ namespace Ferrite {
         public string Location { get; internal set; }
         public Harmony Harmony => harmony ?? (harmony = new Harmony(Info.Id));
         internal bool Faulted { get; set; }
+        internal DateTime Stamp { get; set; }
+        internal float ReloadedAt { get; set; }
+
+        internal void UnpatchAll() {
+            if (harmony != null) {
+                harmony.UnpatchSelf();
+                harmony = null;
+            }
+        }
 
         public virtual void OnLoad() {
         }
@@ -47,6 +58,12 @@ namespace Ferrite {
         }
 
         public virtual void OnQuit() {
+        }
+
+        public virtual void OnUnload() {
+        }
+
+        public virtual void OnConfigChanged() {
         }
     }
 }

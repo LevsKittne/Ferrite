@@ -1,4 +1,5 @@
 mod config;
+mod console;
 mod deps;
 mod detour;
 mod iat;
@@ -7,6 +8,8 @@ mod log;
 mod mods;
 mod mono;
 mod native;
+mod overlay;
+mod patched;
 mod proxy;
 mod sys;
 
@@ -40,8 +43,8 @@ struct Setup {
 }
 
 #[derive(Debug)]
-struct Runtime {
-    mono: Mono,
+pub(crate) struct Runtime {
+    pub(crate) mono: Mono,
     mod_class: Class,
     attr_class: Class,
 }
@@ -50,7 +53,7 @@ unsafe impl Send for Runtime {}
 unsafe impl Sync for Runtime {}
 
 static SETUP: OnceLock<Setup> = OnceLock::new();
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+pub(crate) static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static ORIGINAL_JIT_INIT: AtomicUsize = AtomicUsize::new(0);
 static MONO_MODULE: AtomicUsize = AtomicUsize::new(0);
 static ORIGINAL_IL2CPP_INIT: AtomicUsize = AtomicUsize::new(0);
@@ -84,7 +87,11 @@ fn attach(module: HMODULE) {
     let (config, config_error) = LoaderConfig::load(&root.join("ferrite.toml"));
     let command_line = unsafe { sys::from_wide_ptr(GetCommandLineW()) };
     let enabled = config.loader.enabled && !command_line.contains("--no-mods");
-    log::init(&root.join("log.txt"), enabled && config.loader.console);
+    log::init(
+        &root.join("log.txt"),
+        enabled && config.loader.console,
+        &config.log,
+    );
     info!(
         "Ferrite {VERSION} attached, game dir: {}",
         game_dir.display()
@@ -128,7 +135,13 @@ fn is_unity_player() -> bool {
     })
 }
 
-fn game_name() -> String {
+fn managed_dir() -> PathBuf {
+    let exe = sys::module_path(std::ptr::null_mut());
+    exe.with_file_name(format!("{}_Data", game_name()))
+        .join("Managed")
+}
+
+pub(crate) fn game_name() -> String {
     sys::module_path(std::ptr::null_mut())
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -146,6 +159,9 @@ unsafe extern "system" fn get_proc_address_hook(module: HMODULE, name: *const u8
         MONO_MODULE.store(module as usize, Ordering::SeqCst);
         return jit_init_hook as *mut c_void;
     }
+    if let Some(hook) = patched::intercept(unsafe { sys::c_bytes(name) }, real) {
+        return hook;
+    }
     if unsafe { sys::c_bytes(name) } == b"il2cpp_init" {
         ORIGINAL_IL2CPP_INIT.store(real as usize, Ordering::SeqCst);
         IL2CPP_MODULE.store(module as usize, Ordering::SeqCst);
@@ -160,8 +176,15 @@ fn open_console() {
     }
 }
 
+fn start_menu(runtime: &'static str) {
+    if let Some(setup) = SETUP.get().filter(|s| s.config.loader.menu) {
+        overlay::init(setup.root.clone(), runtime, &setup.config.loader.menu_key);
+    }
+}
+
 unsafe extern "C" fn il2cpp_init_hook(domain_name: *const c_char) -> i32 {
     open_console();
+    let _ = catch_unwind(|| start_menu("IL2CPP"));
     let original: Il2CppInit = unsafe {
         std::mem::transmute::<usize, Il2CppInit>(ORIGINAL_IL2CPP_INIT.load(Ordering::SeqCst))
     };
@@ -171,8 +194,8 @@ unsafe extern "C" fn il2cpp_init_hook(domain_name: *const c_char) -> i32 {
         info!("IL2CPP runtime initialized");
         il2cpp::boot(
             IL2CPP_MODULE.load(Ordering::SeqCst) as HMODULE,
-            setup.root.join("mods"),
-            setup.config.mods.disabled.clone(),
+            setup.root.clone(),
+            setup.config.clone(),
         );
     });
     if booted.is_err() {
@@ -181,8 +204,48 @@ unsafe extern "C" fn il2cpp_init_hook(domain_name: *const c_char) -> i32 {
     result
 }
 
+fn enable_debugger() {
+    let Some(setup) = SETUP.get().filter(|s| s.config.debug.enabled) else {
+        return;
+    };
+    let module = MONO_MODULE.load(Ordering::SeqCst) as HMODULE;
+    let (Some(parse), Some(debug_init)) = (unsafe {
+        (
+            GetProcAddress(module, c"mono_jit_parse_options".as_ptr().cast()),
+            GetProcAddress(module, c"mono_debug_init".as_ptr().cast()),
+        )
+    }) else {
+        error!("this Mono build has no debugger support");
+        return;
+    };
+    let debug = &setup.config.debug;
+    let option = format!(
+        "--debugger-agent=transport=dt_socket,server=y,address={},suspend={}\0",
+        debug.address,
+        if debug.suspend { "y" } else { "n" }
+    );
+    let mut argv = [option.as_ptr().cast::<c_char>()];
+    unsafe {
+        let parse: unsafe extern "C" fn(i32, *mut *const c_char) = std::mem::transmute(parse);
+        let debug_init: unsafe extern "C" fn(i32) = std::mem::transmute(debug_init);
+        parse(1, argv.as_mut_ptr());
+        debug_init(1);
+    }
+    info!(
+        "Mono debugger listening on {}{}",
+        debug.address,
+        if debug.suspend {
+            ", waiting for a debugger"
+        } else {
+            ""
+        }
+    );
+}
+
 unsafe extern "C" fn jit_init_hook(root: *const c_char, runtime: *const c_char) -> Ptr {
     open_console();
+    let _ = catch_unwind(enable_debugger);
+    let _ = catch_unwind(|| start_menu("Mono"));
     let original: JitInit =
         unsafe { std::mem::transmute::<usize, JitInit>(ORIGINAL_JIT_INIT.load(Ordering::SeqCst)) };
     let domain = unsafe { original(root, runtime) };
@@ -226,7 +289,7 @@ fn boot() {
     });
     match runtime
         .mono
-        .invoke_static(image, API_NAMESPACE, "Runtime", "Boot")
+        .invoke_static(image, API_NAMESPACE, "Bootstrap", "Start")
     {
         Ok(()) => info!("managed runtime started"),
         Err(e) => error!("managed runtime failed: {e}"),
@@ -234,7 +297,17 @@ fn boot() {
 }
 
 fn register_icalls(mono: &Mono) {
-    let calls: [(&str, *const c_void); 7] = [
+    let calls: [(&str, *const c_void); 17] = [
+        ("MenuOpen", icall_menu_open as *const c_void),
+        ("ReportMods", icall_report_mods as *const c_void),
+        ("LoadPatched", icall_load_patched as *const c_void),
+        ("ConfigDescribe", icall_config_describe as *const c_void),
+        ("ConfigList", icall_config_list as *const c_void),
+        ("ConfigPoll", icall_config_poll as *const c_void),
+        ("Builtin", icall_builtin as *const c_void),
+        ("BuiltinHelp", icall_builtin_help as *const c_void),
+        ("LogSequence", icall_log_sequence as *const c_void),
+        ("LogTail", icall_log_tail as *const c_void),
         ("Log", icall_log as *const c_void),
         ("NextCommand", icall_next_command as *const c_void),
         ("DiscoverMods", icall_discover_mods as *const c_void),
@@ -302,6 +375,9 @@ unsafe extern "C" fn icall_discover_mods() -> Ptr {
 unsafe extern "C" fn icall_option(key: Ptr) -> Ptr {
     guarded(null(), |rt| {
         let key = unsafe { rt.mono.read_string(key) }.unwrap_or_default();
+        if key == "managed_dir" {
+            return rt.mono.new_string(&managed_dir().to_string_lossy());
+        }
         SETUP
             .get()
             .and_then(|s| s.config.option(&key))
@@ -341,4 +417,106 @@ unsafe extern "C" fn icall_root_dir() -> Ptr {
             .get()
             .map_or_else(null, |s| rt.mono.new_string(&s.root.to_string_lossy()))
     })
+}
+
+fn joined(lines: impl IntoIterator<Item = String>) -> String {
+    lines.into_iter().collect::<Vec<_>>().join("\n")
+}
+
+unsafe extern "C" fn icall_config_describe(id: Ptr, key: Ptr, description: Ptr) {
+    guarded((), |rt| {
+        let read = |p| unsafe { rt.mono.read_string(p) }.unwrap_or_default();
+        let (id, key, description) = (read(id), read(key), read(description));
+        if let Some(Err(e)) = config::with_mod_configs(|c| c.describe(&id, &key, &description)) {
+            error!("cannot save config for {id}: {e}");
+        }
+    });
+}
+
+unsafe extern "C" fn icall_config_list(id: Ptr) -> Ptr {
+    guarded(null(), |rt| {
+        let id = unsafe { rt.mono.read_string(id) }.unwrap_or_default();
+        let entries = config::with_mod_configs(|c| c.list(&id)).unwrap_or_default();
+        rt.mono.new_string(&joined(
+            entries.into_iter().map(|(k, v)| format!("{k}\t{v}")),
+        ))
+    })
+}
+
+unsafe extern "C" fn icall_config_poll() -> Ptr {
+    guarded(null(), |rt| {
+        let changed = config::with_mod_configs(config::ModConfigs::poll).unwrap_or_default();
+        if changed.is_empty() {
+            null()
+        } else {
+            rt.mono.new_string(&joined(changed))
+        }
+    })
+}
+
+unsafe extern "C" fn icall_builtin(line: Ptr) -> bool {
+    guarded(false, |rt| {
+        let line = unsafe { rt.mono.read_string(line) }.unwrap_or_default();
+        console::builtin(&line)
+    })
+}
+
+unsafe extern "C" fn icall_builtin_help() -> Ptr {
+    guarded(null(), |rt| rt.mono.new_string(&joined(console::help())))
+}
+
+unsafe extern "C" fn icall_log_sequence() -> i64 {
+    log::sequence()
+}
+
+unsafe extern "C" fn icall_log_tail() -> Ptr {
+    guarded(null(), |rt| rt.mono.new_string(&log::recent()))
+}
+
+unsafe extern "C" fn icall_load_patched(path: Ptr, data: Ptr) -> bool {
+    guarded(false, |rt| {
+        let path = unsafe { rt.mono.read_string(path) }.unwrap_or_default();
+        let bytes = unsafe { rt.mono.bytes(data) };
+        match rt.mono.load_from_memory(&path, bytes) {
+            Ok((assembly, image)) if rt.mono.assembly_image(assembly) != image => {
+                error!(
+                    "{path} was loaded before patching, patches are not applied; patchers must not reference game assemblies"
+                );
+                false
+            }
+            Ok((assembly, image)) => {
+                patched::register(&path, assembly, image);
+                true
+            }
+            Err(e) => {
+                error!("cannot load patched {path}: {e}");
+                false
+            }
+        }
+    })
+}
+
+unsafe extern "C" fn icall_menu_open() -> bool {
+    overlay::is_open()
+}
+
+unsafe extern "C" fn icall_report_mods(rows: Ptr) {
+    guarded((), |rt| {
+        let text = unsafe { rt.mono.read_string(rows) }.unwrap_or_default();
+        let rows = text
+            .lines()
+            .filter_map(|line| {
+                let mut f = line.split('\t');
+                Some(overlay::ModRow {
+                    id: f.next()?.to_owned(),
+                    name: f.next()?.to_owned(),
+                    version: f.next()?.to_owned(),
+                    author: f.next()?.to_owned(),
+                    faulted: f.next() == Some("1"),
+                    kind: "C#",
+                })
+            })
+            .collect();
+        overlay::set_mods("C#", rows);
+    });
 }

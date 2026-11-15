@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace Ferrite {
@@ -8,45 +10,92 @@ namespace Ferrite {
             this.id = id;
         }
 
-        public string Get(string key, string fallback) {
+        public event Action Changed;
+
+        internal void RaiseChanged() => Changed?.Invoke();
+
+        public IEnumerable<KeyValuePair<string, string>> Entries => Parse(Native.ConfigList(id));
+
+        internal static IEnumerable<KeyValuePair<string, string>> Parse(string raw) {
+            if (string.IsNullOrEmpty(raw)) {
+                yield break;
+            }
+            foreach (var line in raw.Split('\n')) {
+                var tab = line.IndexOf('\t');
+                if (tab > 0) {
+                    yield return new KeyValuePair<string, string>(line.Substring(0, tab), line.Substring(tab + 1));
+                }
+            }
+        }
+
+        public string Get(string key, string fallback, string description = null) {
             var value = Native.ConfigGet(id, key);
             if (value == null) {
                 Set(key, fallback);
-                return fallback;
+                value = fallback;
             }
+            Describe(key, description);
             return value;
         }
 
-        public bool Get(string key, bool fallback) {
+        public bool Get(string key, bool fallback, string description = null) {
             var value = Native.ConfigGet(id, key);
-            if (value != null && bool.TryParse(value, out var b)) {
-                return b;
+            if (value == null || !bool.TryParse(value, out var b)) {
+                Set(key, fallback);
+                b = fallback;
             }
-            Set(key, fallback);
-            return fallback;
+            Describe(key, description);
+            return b;
         }
 
-        public long Get(string key, long fallback) {
+        public long Get(string key, long fallback, string description = null) {
             var value = Native.ConfigGet(id, key);
-            if (value != null && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)) {
-                return l;
+            if (value == null || !long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)) {
+                Set(key, fallback);
+                l = fallback;
             }
-            Set(key, fallback);
-            return fallback;
+            Describe(key, description);
+            return l;
         }
 
-        public double Get(string key, double fallback) {
+        public int Get(string key, int fallback, string description = null) => (int)Get(key, (long)fallback, description);
+
+        public double Get(string key, double fallback, string description = null) {
             var value = Native.ConfigGet(id, key);
-            if (value != null && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) {
-                return d;
+            if (value == null || !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) {
+                Set(key, fallback);
+                d = fallback;
             }
-            Set(key, fallback);
-            return fallback;
+            Describe(key, description);
+            return d;
+        }
+
+        public float Get(string key, float fallback, string description = null) => (float)Get(key, (double)fallback, description);
+
+        public T GetEnum<T>(string key, T fallback, string description = null) where T : struct {
+            var names = "One of: " + string.Join(", ", Enum.GetNames(typeof(T)));
+            var value = Native.ConfigGet(id, key);
+            T e;
+            try {
+                e = value == null ? fallback : (T)Enum.Parse(typeof(T), value, true);
+            } catch (ArgumentException) {
+                e = fallback;
+            }
+            Set(key, e.ToString());
+            Describe(key, string.IsNullOrEmpty(description) ? names : description + "\n" + names);
+            return e;
+        }
+
+        void Describe(string key, string description) {
+            if (!string.IsNullOrEmpty(description)) {
+                Native.ConfigDescribe(id, key, description);
+            }
         }
 
         public void Set(string key, string value) => Native.ConfigSet(id, key, value ?? "", 0);
         public void Set(string key, bool value) => Native.ConfigSet(id, key, value ? "true" : "false", 1);
         public void Set(string key, long value) => Native.ConfigSet(id, key, value.ToString(CultureInfo.InvariantCulture), 2);
         public void Set(string key, double value) => Native.ConfigSet(id, key, value.ToString("R", CultureInfo.InvariantCulture), 3);
+        internal void SetRaw(string key, string value) => Native.ConfigSet(id, key, value ?? "", 4);
     }
 }

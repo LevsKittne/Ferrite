@@ -1,11 +1,14 @@
 use std::ffi::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
+pub const MIN_ABI_VERSION: u32 = 1;
 
 pub const INFO_SYMBOL: &[u8] = b"ferrite_mod_info\0";
 pub const LOAD_SYMBOL: &[u8] = b"ferrite_mod_load\0";
 pub const UPDATE_SYMBOL: &[u8] = b"ferrite_mod_update\0";
 pub const SCENE_SYMBOL: &[u8] = b"ferrite_mod_scene\0";
+pub const UNLOAD_SYMBOL: &[u8] = b"ferrite_mod_unload\0";
+pub const CONFIG_SYMBOL: &[u8] = b"ferrite_mod_config_changed\0";
 
 #[repr(C)]
 #[derive(Debug)]
@@ -54,12 +57,35 @@ pub struct Api {
         value_len: usize,
         kind: i32,
     ),
+    pub config_describe: unsafe extern "C" fn(
+        handle: Handle,
+        key: *const u8,
+        key_len: usize,
+        description: *const u8,
+        description_len: usize,
+    ),
+    pub hook_owned: unsafe extern "C" fn(
+        handle: Handle,
+        target: *mut c_void,
+        detour: *mut c_void,
+    ) -> *mut c_void,
+    pub unhook: unsafe extern "C" fn(handle: Handle, target: *mut c_void) -> bool,
+    pub patch_pointer: unsafe extern "C" fn(
+        handle: Handle,
+        slot: *mut *mut c_void,
+        value: *mut c_void,
+    ) -> *mut c_void,
+    pub execute: unsafe extern "C" fn(line: *const u8, len: usize),
+    pub directory:
+        unsafe extern "C" fn(handle: Handle, kind: i32, buffer: *mut u8, capacity: usize) -> isize,
 }
 
 pub type InfoFn = unsafe extern "C" fn() -> *const ModInfo;
 pub type LoadFn = unsafe extern "C" fn(api: *const Api, handle: Handle) -> bool;
 pub type UpdateFn = unsafe extern "C" fn();
 pub type SceneFn = unsafe extern "C" fn(name: *const u8, len: usize);
+pub type UnloadFn = unsafe extern "C" fn();
+pub type ConfigFn = unsafe extern "C" fn();
 
 pub const LEVEL_DEBUG: i32 = 0;
 pub const LEVEL_INFO: i32 = 1;
@@ -70,3 +96,8 @@ pub const KIND_STRING: i32 = 0;
 pub const KIND_BOOL: i32 = 1;
 pub const KIND_INT: i32 = 2;
 pub const KIND_FLOAT: i32 = 3;
+
+pub const DIR_ROOT: i32 = 0;
+pub const DIR_GAME: i32 = 1;
+pub const DIR_MOD: i32 = 2;
+pub const DIR_CONFIG: i32 = 3;

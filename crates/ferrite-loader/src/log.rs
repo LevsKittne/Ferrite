@@ -4,6 +4,7 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -16,7 +17,10 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Level {
     Debug,
     Info,
@@ -58,6 +62,8 @@ impl fmt::Display for Level {
 #[derive(Debug, Default)]
 struct Sink {
     file: Option<File>,
+    file_level: Option<Level>,
+    console_level: Option<Level>,
     console: Option<Console>,
     backlog: Option<Vec<(Level, String, String)>>,
 }
@@ -69,12 +75,42 @@ unsafe impl Send for Console {}
 
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 static INPUT: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static RECENT: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static SEQUENCE: AtomicI64 = AtomicI64::new(0);
+const RECENT_LINES: usize = 400;
+
+pub fn sequence() -> i64 {
+    SEQUENCE.load(Ordering::Relaxed)
+}
+
+pub fn recent() -> String {
+    let lines = lock(&RECENT);
+    let mut out = String::new();
+    for line in lines.iter() {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+pub fn set_console_level(level: Level) {
+    if let Some(sink) = lock(&SINK).as_mut() {
+        sink.console_level = Some(level);
+    }
+}
+
+pub fn push_command(line: String) {
+    lock(&INPUT).push_back(line);
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn init(path: &Path, buffer_for_console: bool) {
+pub fn init(path: &Path, buffer_for_console: bool, levels: &crate::config::LogSection) {
+    if levels.keep_previous && path.exists() {
+        let _ = std::fs::rename(path, path.with_extension("prev.txt"));
+    }
     let file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -83,6 +119,8 @@ pub fn init(path: &Path, buffer_for_console: bool) {
         .ok();
     *lock(&SINK) = Some(Sink {
         file,
+        file_level: Some(levels.file_level),
+        console_level: Some(levels.console_level),
         console: None,
         backlog: buffer_for_console.then(Vec::new),
     });
@@ -175,8 +213,23 @@ pub fn next_command() -> Option<String> {
 pub fn write(level: Level, source: &str, message: &str) {
     let mut guard = lock(&SINK);
     let Some(sink) = guard.as_mut() else { return };
-    if let Some(file) = sink.file.as_mut() {
+    let passes = |min: Option<Level>| min.is_none_or(|m| level >= m);
+    let (to_file, to_console) = (passes(sink.file_level), passes(sink.console_level));
+    if let Some(file) = sink.file.as_mut().filter(|_| to_file) {
         let _ = write!(file, "[{}] [{source}] [{level}] {message}\r\n", timestamp());
+    }
+    if !to_console {
+        return;
+    }
+    {
+        let mut recent = lock(&RECENT);
+        for line in message.lines() {
+            if recent.len() >= RECENT_LINES {
+                recent.pop_front();
+            }
+            recent.push_back(format!("[{level}] [{source}] {line}"));
+        }
+        SEQUENCE.fetch_add(1, Ordering::Relaxed);
     }
     if let Some(console) = sink.console {
         print(console, level, source, message);

@@ -18,6 +18,10 @@ impl Node for ModEntry {
         &self.id
     }
 
+    fn version(&self) -> &str {
+        &self.version
+    }
+
     fn dependencies(&self) -> &[Dependency] {
         &self.dependencies
     }
@@ -34,9 +38,13 @@ pub fn discover(
     attr_class: Class,
     disabled: &[String],
 ) -> Vec<ModEntry> {
-    let mut catalog = Catalog::new(disabled);
+    let mut catalog = Catalog::new(disabled, &crate::game_name());
     for file in deps::dlls(mods_dir) {
-        let Some(image) = mono.open_image(&file.to_string_lossy()) else {
+        let Some(image) = std::fs::read(&file)
+            .ok()
+            .and_then(|bytes| mono.load_from_memory(&file.to_string_lossy(), &bytes).ok())
+            .map(|(_, image)| image)
+        else {
             warning!("skipping {}: not a .NET assembly", file.display());
             continue;
         };
@@ -66,11 +74,18 @@ pub fn discover(
                 version: mono
                     .string_field(attr, attr_class, "Version")
                     .unwrap_or_default(),
-                dependencies: mono
-                    .string_array_field(attr, attr_class, "Dependencies")
-                    .iter()
-                    .map(|d| Dependency::parse(d))
-                    .collect(),
+                dependencies: [
+                    ("Dependencies", ""),
+                    ("Incompatibilities", "!"),
+                    ("Processes", "@"),
+                ]
+                .iter()
+                .flat_map(|(field, prefix)| {
+                    mono.string_array_field(attr, attr_class, field)
+                        .into_iter()
+                        .map(move |d| Dependency::parse(&format!("{prefix}{d}")))
+                })
+                .collect(),
                 id,
                 class,
                 file: file.clone(),

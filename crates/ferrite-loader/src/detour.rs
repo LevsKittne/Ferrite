@@ -19,6 +19,14 @@ const REACH: usize = 0x4000_0000;
 const GRANULARITY: usize = 0x1_0000;
 
 static PATCH_LOCK: Mutex<()> = Mutex::new(());
+static INSTALLED: Mutex<Vec<Installed>> = Mutex::new(Vec::new());
+
+#[derive(Debug)]
+struct Installed {
+    target: usize,
+    original: Vec<u8>,
+    patch: Vec<u8>,
+}
 
 #[derive(Debug)]
 pub enum DetourError {
@@ -27,6 +35,8 @@ pub enum DetourError {
     Encode(String),
     NoMemoryNearTarget,
     Protect,
+    NotHooked,
+    Overwritten,
 }
 
 impl fmt::Display for DetourError {
@@ -37,6 +47,10 @@ impl fmt::Display for DetourError {
             Self::Encode(e) => write!(f, "cannot relocate prologue: {e}"),
             Self::NoMemoryNearTarget => f.write_str("no free memory within 2 GB of the target"),
             Self::Protect => f.write_str("cannot change page protection"),
+            Self::NotHooked => f.write_str("no hook installed there"),
+            Self::Overwritten => {
+                f.write_str("hooked again by someone else, remove that hook first")
+            }
         }
     }
 }
@@ -165,13 +179,77 @@ pub unsafe fn install(
     unsafe { FlushInstructionCache(GetCurrentProcess(), trampoline.cast(), code.len()) };
     let mut patch = absolute_jump(detour as u64).to_vec();
     patch.resize(len, 0x90);
+    let original = unsafe { std::slice::from_raw_parts(target.cast::<u8>(), len) }.to_vec();
     unsafe { write_code(target.cast(), &patch) }?;
+    INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(Installed {
+            target: target as usize,
+            original,
+            patch,
+        });
     Ok(trampoline.cast_const().cast())
+}
+
+pub unsafe fn uninstall(target: *mut c_void) -> Result<(), DetourError> {
+    let _guard = PATCH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut installed = INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(index) = installed.iter().rposition(|i| i.target == target as usize) else {
+        return Err(DetourError::NotHooked);
+    };
+    let entry = &installed[index];
+    let current = unsafe { std::slice::from_raw_parts(target.cast::<u8>(), entry.patch.len()) };
+    if current != entry.patch.as_slice() {
+        return Err(DetourError::Overwritten);
+    }
+    unsafe { write_code(target.cast(), &entry.original) }?;
+    installed.remove(index);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{JUMP_LEN, absolute_jump, prologue};
+    use super::{JUMP_LEN, absolute_jump, install, prologue, uninstall};
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, VirtualAlloc,
+    };
+
+    extern "C" fn two() -> u64 {
+        2
+    }
+
+    #[test]
+    fn hook_and_unhook_live_code() {
+        let code: [u8; 16] = [
+            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+            0x90, 0xC3,
+        ];
+        let page = unsafe {
+            VirtualAlloc(
+                std::ptr::null(),
+                4096,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_EXECUTE_READWRITE,
+            )
+        }
+        .cast::<u8>();
+        assert!(!page.is_null());
+        unsafe { std::ptr::copy_nonoverlapping(code.as_ptr(), page, code.len()) };
+        let target: extern "C" fn() -> u64 = unsafe { std::mem::transmute(page) };
+        assert_eq!(target(), 1);
+        let trampoline = unsafe { install(page.cast(), (two as *const ()).cast()) }.unwrap();
+        let original: extern "C" fn() -> u64 = unsafe { std::mem::transmute(trampoline) };
+        assert_eq!(target(), 2);
+        assert_eq!(original(), 1);
+        unsafe { uninstall(page.cast()) }.unwrap();
+        assert_eq!(target(), 1);
+        assert!(unsafe { uninstall(page.cast()) }.is_err());
+    }
 
     #[test]
     fn absolute_jump_layout() {
