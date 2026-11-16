@@ -1,6 +1,8 @@
 # Ferrite
 
-Lightweight mod loader for **Unity games**, Mono and IL2CPP, with a Rust core.
+English · [Русский](docs/i18n/README.ru.md) · [Українська](docs/i18n/README.uk.md) · [中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português](docs/i18n/README.pt-BR.md) · [Deutsch](docs/i18n/README.de.md) · [Français](docs/i18n/README.fr.md) · [日本語](docs/i18n/README.ja.md) · [한국어](docs/i18n/README.ko.md) · [Türkçe](docs/i18n/README.tr.md) · [Polski](docs/i18n/README.pl.md) · [Italiano](docs/i18n/README.it.md) · [Tiếng Việt](docs/i18n/README.vi.md) · [Bahasa Indonesia](docs/i18n/README.id.md)
+
+Lightweight mod loader for **Unity games**, Mono and IL2CPP, with a Rust core. A free alternative to BepInEx and MelonLoader: one `version.dll`, starts faster, almost no extra memory, one-click installer. Changes per version are in the [CHANGELOG](CHANGELOG.md).
 
 - Works with any Unity game, no per-game setup. Mono tested on Unity 2020.3, 2022.3 and 6000.3, IL2CPP on 2022.3.
 - Rust does the heavy lifting: bootstrap, mod discovery, dependency order, configs, logging, console.
