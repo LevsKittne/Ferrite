@@ -10,6 +10,10 @@ $core = Join-Path $dist "Ferrite\core"
 $examples = Join-Path $dist "examples"
 $setup = Join-Path $dist "setup"
 
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+$rustup = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE ".rustup" }
+$env:CARGO_ENCODED_RUSTFLAGS = @("--remap-path-prefix=$cargoHome=cargo", "--remap-path-prefix=$rustup=rustup", "--remap-path-prefix=$root=ferrite") -join [char]0x1f
+
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 New-Item -ItemType Directory -Force $core, $examples, $setup | Out-Null
 

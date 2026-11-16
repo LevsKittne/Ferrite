@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 
 namespace Ferrite {
     public static class Runtime {
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         static readonly List<Mod> mods = new List<Mod>();
         static readonly Logger log = new Logger("Ferrite");

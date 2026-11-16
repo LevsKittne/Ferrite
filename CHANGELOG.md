@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.1] - 2026-11-16
 
 ### Added
 - The menu works with any renderer. Direct3D 11 games get it drawn inside the game; Direct3D 12, Vulkan and OpenGL games (and a paused game) get it in a transparent window over the game.

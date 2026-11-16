@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Ferrite</AssemblyName>
     <RootNamespace>Ferrite</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Mono.Cecil"><HintPath>$(LibsDir)\Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
