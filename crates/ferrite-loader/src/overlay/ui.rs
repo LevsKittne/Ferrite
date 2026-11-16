@@ -31,6 +31,17 @@ pub fn style(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
     visuals.selection.bg_fill = ACCENT.gamma_multiply(0.6);
     visuals.hyperlink_color = ACCENT;
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
+    visuals.menu_corner_radius = egui::CornerRadius::same(8);
+    for w in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        w.corner_radius = egui::CornerRadius::same(w.corner_radius.nw.saturating_add(2));
+    }
     ctx.set_visuals(visuals);
 }
 
@@ -38,7 +49,16 @@ fn loader_path() -> Option<std::path::PathBuf> {
     INFO.get().map(|i| i.root.join("ferrite.toml"))
 }
 
-pub fn draw(ctx: &egui::Context, st: &mut UiState) {
+static SHARED: std::sync::Mutex<Option<UiState>> = std::sync::Mutex::new(None);
+
+pub fn draw_shared(ui: &mut egui::Ui) {
+    let mut guard = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    draw(ui.ctx(), guard.get_or_insert_with(UiState::default));
+}
+
+fn draw(ctx: &egui::Context, st: &mut UiState) {
     let mut open = true;
     let title = INFO.get().map_or_else(
         || format!("Ferrite {}", env!("CARGO_PKG_VERSION")),
@@ -55,27 +75,34 @@ pub fn draw(ctx: &egui::Context, st: &mut UiState) {
         .id(egui::Id::new("ferrite_menu"))
         .open(&mut open)
         .default_pos(egui::pos2(40.0, 60.0))
-        .default_size(egui::vec2(620.0, 520.0))
+        .default_size(egui::vec2(640.0, 480.0))
+        .min_size(egui::vec2(460.0, 300.0))
         .resizable(true)
+        .scroll(false)
         .collapsible(false)
+        .constrain(true)
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let count = super::mods().len();
-                ui.selectable_value(&mut st.tab, Tab::Mods, format!("Mods ({count})"));
-                ui.selectable_value(&mut st.tab, Tab::Console, "Console");
-                ui.selectable_value(&mut st.tab, Tab::Loader, "Loader");
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                ui.small(format!(
+                    "{} or Esc closes the menu",
+                    super::input::menu_key_name()
+                ));
+                ui.separator();
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.horizontal(|ui| {
+                        let count = super::mods().len();
+                        ui.selectable_value(&mut st.tab, Tab::Mods, format!("Mods ({count})"));
+                        ui.selectable_value(&mut st.tab, Tab::Console, "Console");
+                        ui.selectable_value(&mut st.tab, Tab::Loader, "Loader");
+                    });
+                    ui.separator();
+                    match st.tab {
+                        Tab::Mods => mods_tab(ui, st),
+                        Tab::Console => console_tab(ui, st),
+                        Tab::Loader => loader_tab(ui, st),
+                    }
+                });
             });
-            ui.separator();
-            match st.tab {
-                Tab::Mods => mods_tab(ui, st),
-                Tab::Console => console_tab(ui, st),
-                Tab::Loader => loader_tab(ui, st),
-            }
-            ui.separator();
-            ui.small(format!(
-                "{} or Esc closes the menu",
-                super::input::menu_key_name()
-            ));
         });
     if !open {
         VISIBLE.store(false, Ordering::SeqCst);
@@ -93,7 +120,6 @@ fn mods_tab(ui: &mut egui::Ui, st: &mut UiState) {
     let filter = st.filter.to_lowercase();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .max_height(ui.available_height() - 24.0)
         .show(ui, |ui| {
             let mods = super::mods();
             if mods.is_empty() {
@@ -273,30 +299,33 @@ fn console_tab(ui: &mut egui::Ui, st: &mut UiState) {
     });
     let filter = st.log_filter.to_lowercase();
     let text = log::recent();
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .max_height(ui.available_height() - 32.0)
-        .stick_to_bottom(true)
-        .show(ui, |ui| {
-            for line in text
-                .lines()
-                .filter(|l| filter.is_empty() || l.to_lowercase().contains(&filter))
-            {
-                ui.label(RichText::new(line).monospace().color(level_color(line)));
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        ui.horizontal(|ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut st.input)
+                    .desired_width(ui.available_width() - 60.0)
+                    .hint_text("command, try help"),
+            );
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (ui.button("Run").clicked() || enter) && !st.input.trim().is_empty() {
+                log::push_command(st.input.trim().to_owned());
+                st.input.clear();
+                edit.request_focus();
             }
         });
-    ui.horizontal(|ui| {
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut st.input)
-                .desired_width(ui.available_width() - 60.0)
-                .hint_text("command, try help"),
-        );
-        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (ui.button("Run").clicked() || enter) && !st.input.trim().is_empty() {
-            log::push_command(st.input.trim().to_owned());
-            st.input.clear();
-            edit.request_focus();
-        }
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for line in text
+                        .lines()
+                        .filter(|l| filter.is_empty() || l.to_lowercase().contains(&filter))
+                    {
+                        ui.label(RichText::new(line).monospace().color(level_color(line)));
+                    }
+                });
+        });
     });
 }
 
@@ -304,74 +333,84 @@ fn loader_tab(ui: &mut egui::Ui, st: &mut UiState) {
     let Some(path) = loader_path() else { return };
     let cfg = st.loader.get_or_insert_with(|| config::read_loader(&path));
     let before = format!("{cfg:?}");
-    egui::Grid::new("ferrite_loader")
-        .num_columns(2)
-        .spacing([16.0, 8.0])
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.label("Console window");
-            ui.checkbox(&mut cfg.loader.console, "");
-            ui.end_row();
-            ui.label("Capture Unity log");
-            ui.checkbox(&mut cfg.loader.unity_log, "");
-            ui.end_row();
-            ui.label("Start mods");
-            ui.horizontal(|ui| {
-                ui.selectable_value(
-                    &mut cfg.loader.entrypoint,
-                    Entrypoint::Early,
-                    "before the first scene",
-                );
-                ui.selectable_value(
-                    &mut cfg.loader.entrypoint,
-                    Entrypoint::Scene,
-                    "on the first scene",
-                );
-            });
-            ui.end_row();
-            ui.label("Menu key");
-            egui::ComboBox::from_id_salt("ferrite_menu_key")
-                .selected_text(cfg.loader.menu_key.clone())
-                .show_ui(ui, |ui| {
-                    for (name, _) in super::input::NAMES {
-                        ui.selectable_value(&mut cfg.loader.menu_key, name.to_owned(), name);
-                    }
+            egui::Grid::new("ferrite_loader")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Console window");
+                    ui.checkbox(&mut cfg.loader.console, "");
+                    ui.end_row();
+                    ui.label("Capture Unity log");
+                    ui.checkbox(&mut cfg.loader.unity_log, "");
+                    ui.end_row();
+                    ui.label("Start mods");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut cfg.loader.entrypoint,
+                            Entrypoint::Early,
+                            "before the first scene",
+                        );
+                        ui.selectable_value(
+                            &mut cfg.loader.entrypoint,
+                            Entrypoint::Scene,
+                            "on the first scene",
+                        );
+                    });
+                    ui.end_row();
+                    ui.label("Menu key");
+                    egui::ComboBox::from_id_salt("ferrite_menu_key")
+                        .selected_text(cfg.loader.menu_key.clone())
+                        .show_ui(ui, |ui| {
+                            for (name, _) in super::input::NAMES {
+                                ui.selectable_value(
+                                    &mut cfg.loader.menu_key,
+                                    name.to_owned(),
+                                    name,
+                                );
+                            }
+                        });
+                    ui.end_row();
+                    ui.label("Hot reload mods");
+                    ui.checkbox(&mut cfg.mods.hot_reload, "");
+                    ui.end_row();
+                    ui.label("Console log level");
+                    level_combo(ui, "ferrite_console_level", &mut cfg.log.console_level);
+                    ui.end_row();
+                    ui.label("File log level");
+                    level_combo(ui, "ferrite_file_level", &mut cfg.log.file_level);
+                    ui.end_row();
+                    ui.label("Mono debugger");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut cfg.debug.enabled, "");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut cfg.debug.address).desired_width(150.0),
+                        );
+                        ui.checkbox(&mut cfg.debug.suspend, "wait for debugger");
+                    });
+                    ui.end_row();
+                    ui.label("Dump patched assemblies");
+                    ui.checkbox(&mut cfg.patchers.dump_assemblies, "");
+                    ui.end_row();
                 });
-            ui.end_row();
-            ui.label("Hot reload mods");
-            ui.checkbox(&mut cfg.mods.hot_reload, "");
-            ui.end_row();
-            ui.label("Console log level");
-            level_combo(ui, "ferrite_console_level", &mut cfg.log.console_level);
-            ui.end_row();
-            ui.label("File log level");
-            level_combo(ui, "ferrite_file_level", &mut cfg.log.file_level);
-            ui.end_row();
-            ui.label("Mono debugger");
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut cfg.debug.enabled, "");
-                ui.add(egui::TextEdit::singleline(&mut cfg.debug.address).desired_width(150.0));
-                ui.checkbox(&mut cfg.debug.suspend, "wait for debugger");
-            });
-            ui.end_row();
-            ui.label("Dump patched assemblies");
-            ui.checkbox(&mut cfg.patchers.dump_assemblies, "");
-            ui.end_row();
+            if format!("{cfg:?}") != before {
+                let cfg = cfg.clone();
+                let _ = config::edit_loader(&path, |doc| write_loader(doc, &cfg));
+                log::set_console_level(cfg.log.console_level);
+                super::input::set_menu_key(&cfg.loader.menu_key);
+                st.saved = true;
+            }
+            ui.add_space(8.0);
+            if st.saved {
+                ui.label(
+                    RichText::new("Saved to ferrite.toml. Most options apply on the next start.")
+                        .color(ACCENT),
+                );
+            }
+            ui.label(RichText::new(path.display().to_string()).weak().small());
         });
-    if format!("{cfg:?}") != before {
-        let cfg = cfg.clone();
-        let _ = config::edit_loader(&path, |doc| write_loader(doc, &cfg));
-        log::set_console_level(cfg.log.console_level);
-        super::input::set_menu_key(&cfg.loader.menu_key);
-        st.saved = true;
-    }
-    ui.add_space(8.0);
-    if st.saved {
-        ui.label(
-            RichText::new("Saved to ferrite.toml. Most options apply on the next start.")
-                .color(ACCENT),
-        );
-    }
-    ui.label(RichText::new(path.display().to_string()).weak().small());
 }
 
 fn level_combo(ui: &mut egui::Ui, id: &str, level: &mut Level) {

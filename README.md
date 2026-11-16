@@ -7,7 +7,7 @@ Lightweight mod loader for **Unity games**, Mono and IL2CPP, with a Rust core.
 - Mono games: mods are plain C# libraries with Harmony.
 - IL2CPP games: mods are Rust libraries built with `ferrite-sdk` (game classes, method calls, inline hooks).
 - Console window with commands you can type while the game runs.
-- In-game menu written in Rust (egui over Direct3D 11): mods, live settings, console, loader options. F1 by default.
+- In-game menu written in Rust (egui): mods, live settings, console, loader options. F1 by default. Works with any renderer: drawn inside Direct3D 11 games, in a transparent overlay window for Direct3D 12, Vulkan and OpenGL.
 - Mods start before the first scene, configs and mods reload while the game runs.
 - One-click installer in 12 languages.
 
@@ -150,7 +150,7 @@ export_mod!(Hello, id = "hello", name = "Hello", version = "1.0.0", dependencies
 
 In IL2CPP games it hooks `il2cpp_init` instead. After the runtime starts it swaps the method pointers of `SceneManager.Internal_SceneLoaded`, `Application.CallLogCallback` and several per-frame methods (`UnitySynchronizationContext.ExecuteTasks`, `BeforeRenderHelper.Invoke`, `Canvas.SendWillRenderCanvases`, deduplicated by `Time.frameCount`), loads native mods from `Ferrite\mods` right after `il2cpp_init` and passes them a stable C ABI table (`ferrite_sdk::abi`).
 
-The menu hooks `IDXGISwapChain::Present` with the same inline hook engine, draws egui with egui-directx11 and subclasses the game window for input; game input is blocked and the cursor unlocked while it is open.
+The menu hooks `IDXGISwapChain::Present` with the same inline hook engine, draws egui with egui-directx11 and subclasses the game window for input. When the game sends no Direct3D 11 frames (other renderers, or the game is paused), the menu is drawn in a borderless window over the game's client area with its own Direct3D 11 device and a DirectComposition swap chain with per-pixel alpha; that window does not show over exclusive fullscreen. Game input is blocked and the cursor unlocked while it is open.
 
 ## Building
 

@@ -185,7 +185,7 @@ fn clipboard() -> Option<String> {
     clippy::cast_sign_loss,
     clippy::cast_possible_wrap
 )]
-fn handle(msg: u32, wparam: usize, lparam: isize) -> bool {
+pub(super) fn handle(msg: u32, wparam: usize, lparam: isize) -> bool {
     if msg == WM_CHAR && SKIP_CHAR.swap(false, Ordering::SeqCst) {
         return true;
     }
