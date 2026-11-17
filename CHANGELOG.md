@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- IL2CPP: mods in C#. Ferrite hosts .NET 8+ through hostfxr (bundled `Ferrite\dotnet` or an installed runtime) and loads assemblies that reference the new `Ferrite.Il2Cpp` library: `Mod` with load, update, scene, config and unload callbacks, logger, config, commands, IL2CPP classes, methods, fields, objects, strings and arrays, inline hooks to `[UnmanagedCallersOnly]` methods. They appear in the menu as C#, hot reload through collectible load contexts (`examples/HelloIl2CppCs`).
+
+### Fixed
+- A second inline hook on an already hooked function is refused; before it built a broken trampoline and unloading the first hook could crash the game.
+
 ## [0.2.1] - 2026-11-16
 
 ### Added
