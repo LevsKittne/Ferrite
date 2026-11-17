@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- IL2CPP class injection: `ferrite_sdk::inject::ClassBuilder` builds an `Il2CppClass` from a parent's layout with Rust methods and instance fields; injected classes resolve by name and by `System.Type`, so `AddComponent(Type)` works. Verified layouts for Unity 2021.2 to 6000 (metadata v29 to v31), checked against the game before use. Re-injecting after a mod reload rebinds the existing class.
+- ABI 3 (`register_class`, `stub`).
+
 ## [0.2.1] - 2026-11-16
 
 ### Added

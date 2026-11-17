@@ -222,17 +222,20 @@ pub unsafe fn jump_targets(start: *const c_void, limit: usize) -> Vec<usize> {
             break;
         }
         match instruction.flow_control() {
-            FlowControl::Call => targets.push(instruction.near_branch_target() as usize),
+            FlowControl::Call => targets.push(instruction.near_branch_target()),
             FlowControl::UnconditionalBranch => {
-                targets.push(instruction.near_branch_target() as usize);
+                targets.push(instruction.near_branch_target());
                 break;
             }
             FlowControl::Return | FlowControl::Interrupt | FlowControl::IndirectBranch => break,
             _ => {}
         }
     }
-    targets.retain(|&t| t != 0);
     targets
+        .into_iter()
+        .filter(|&t| t != 0)
+        .filter_map(|t| usize::try_from(t).ok())
+        .collect()
 }
 
 #[cfg(test)]

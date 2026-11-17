@@ -141,7 +141,8 @@ export_mod!(Hello, id = "hello", name = "Hello", version = "1.0.0", dependencies
 - With `hot_reload` native mods are loaded from shadow copies in `Ferritecache`, so a rebuilt dll is picked up while the game runs.
 - `ctx.il2cpp()` also enumerates images, classes, methods and fields, reads and writes fields, creates objects and arrays, pins objects (`pin`) and resolves internal calls (`icall`).
 - `ctx.config(key, default, description)`, `ctx.execute(command)`, `ctx.root_dir()` / `game_dir()` / `mod_dir()` / `config_dir()`.
-- ABI 2; mods built for ABI 1 still load.
+- `ferrite_sdk::inject::ClassBuilder` registers a new IL2CPP class at runtime, for example a `MonoBehaviour` subclass whose `Awake`/`Start`/`Update`/`OnGUI`/`OnDestroy` are Rust functions, with instance fields; add it with `GameObject.AddComponent(Type)` (`il2cpp.type_object(class)`). Needs Unity 2021.2+ (metadata v29+); the class layout is verified against the running game and injection fails with a log line if it does not match. See `FerriteBehaviour` in `examples/hello-native`.
+- ABI 3; mods built for ABI 1 and 2 still load.
 - `ctx.symbol("il2cpp_...")` gives any IL2CPP export.
 - Config, commands and logging work the same as for C# mods.
 - Methods the game never uses may be stripped by IL2CPP and not exist at runtime.

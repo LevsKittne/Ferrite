@@ -180,8 +180,8 @@ unsafe fn wr<T: Copy>(base: Ptr, offset: usize, value: T) {
         base.cast::<u8>()
             .add(offset)
             .cast::<T>()
-            .write_unaligned(value)
-    };
+            .write_unaligned(value);
+    }
 }
 
 fn alloc(size: usize) -> Ptr {
@@ -753,6 +753,7 @@ impl<'a> ClassBuilder<'a> {
         Ok(injected)
     }
 
+    #[allow(clippy::too_many_lines)]
     unsafe fn assemble(
         &self,
         api: &Il2Cpp,
@@ -927,7 +928,7 @@ unsafe fn bind(ctx: &Context, info: Ptr, def: &MethodDef) {
             (M_VIRTUAL_POINTER, stub_method, def.pointer),
             (M_INVOKER, stub_invoker, def.invoker),
         ] {
-            let slot = info.cast::<u8>().add(slot).cast::<Ptr>();
+            let slot = info.byte_add(slot).cast::<Ptr>();
             slot.write_volatile(stub);
             (ctx.api.patch_pointer)(ctx.handle, slot, value);
         }
