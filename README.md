@@ -7,7 +7,7 @@ Lightweight mod loader for **Unity games**, Mono and IL2CPP, with a Rust core. A
 - Works with any Unity game, no per-game setup. Mono tested on Unity 2020.3, 2022.3 and 6000.3, IL2CPP on 2022.3.
 - Rust does the heavy lifting: bootstrap, mod discovery, dependency order, configs, logging, console.
 - Mono games: mods are plain C# libraries with Harmony.
-- IL2CPP games: mods are Rust libraries built with `ferrite-sdk` (game classes, method calls, inline hooks).
+- IL2CPP games: mods are Rust libraries built with `ferrite-sdk` or C# libraries built with `Ferrite.Il2Cpp` on .NET 8 (game classes, method calls, inline hooks).
 - Console window with commands you can type while the game runs.
 - In-game menu written in Rust (egui): mods, live settings, console, loader options. F1 by default. Works with any renderer: drawn inside Direct3D 11 games, in a transparent overlay window for Direct3D 12, Vulkan and OpenGL.
 - Mods start before the first scene, configs and mods reload while the game runs.
@@ -160,11 +160,46 @@ export_mod!(Hello, id = "hello", name = "Hello", version = "1.0.0", dependencies
 - Config, commands and logging work the same as for C# mods.
 - Methods the game never uses may be stripped by IL2CPP and not exist at runtime.
 
+## IL2CPP mods (C#)
+
+IL2CPP mods can also be written in C#. Ferrite starts the .NET runtime (8 or newer, x64) in the game process through `hostfxr` when `Ferrite\mods` contains a .NET assembly. The runtime is taken from `Ferrite\dotnet` if you put one there, otherwise from `DOTNET_ROOT`, `Program Files\dotnet` or `%LOCALAPPDATA%\Microsoft\dotnet`. Without a runtime C# mods are skipped with an error in the log and Rust mods still load. Create a `net8.0` class library with `AllowUnsafeBlocks` that references `Ferrite.Il2Cpp.dll` (`Ferrite\core`) with `Private=false`. See `examples/HelloIl2CppCs`.
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using Ferrite;
+
+[Mod("hello-cs", "Hello C#", "1.0.0", Dependencies = new[] { "other-mod?" })]
+public sealed unsafe class Hello : Mod {
+    static delegate* unmanaged<IntPtr, void> original;
+
+    public override void OnLoad() {
+        var greeting = Config.Get("greeting", "Hello!", "Printed on load.");
+        Il2Cpp.Method("UnityEngine", "Debug", "Log", 1).Invoke(default, greeting);
+        Command("hello", "Prints the greeting.", args => Logger.Info(Config.Get("greeting", "Hello!")));
+        var method = Il2Cpp.Method("UnityEngine", "Canvas", "SendWillRenderCanvases", 0);
+        original = (delegate* unmanaged<IntPtr, void>)Hook(method, (IntPtr)(delegate* unmanaged<IntPtr, void>)&Detour);
+    }
+
+    [UnmanagedCallersOnly]
+    static void Detour(IntPtr method) => original(method);
+}
+```
+
+- Callbacks: `OnLoad`, `OnUpdate` (every frame), `OnSceneLoaded(string)`, `OnConfigChanged`, `OnUnload`. Exceptions are caught and logged; a mod whose `OnUpdate` throws stops getting updates until it is reloaded.
+- `Logger`, `Config` (same API as Mono mods), `Command(name, description, handler)` or `Commands.Register`, `Mod.Execute(line)`, `Location`, `GameDirectory`, `ConfigDirectory`.
+- `Il2Cpp`: `Class(ns, name)`, `Method(ns, class, name, argc)`, `String`, `ReadString`, `Icall`, `Symbol("il2cpp_...")`, `Images`, `Classes`, `AttachThread`.
+- `Il2CppClass` (methods, fields, static fields, `New`, `NewArray`, `Box`, `Call`), `Il2CppMethod` (`Invoke`, `Invoke<T>`, `Address`, parameter types), `Il2CppField` (`Get<T>`, `Set<T>`, `GetObject`, `SetObject`, statics), `Il2CppObject` (`Get<T>("field")`, `Call("method", args)`, `Unbox<T>`, `AsString`, `Pin`), `Il2CppArray` (`Get<T>`, `Set<T>`, `GetObject`, `AsSpan<T>`). `Invoke` arguments: `int`, `float`, `bool` and other blittable values, `string`, `Il2CppObject`, `IntPtr` (object pointer), `null`. IL2CPP exceptions become `Il2CppException`.
+- `Hook(target, detour)` and `Hook(Il2CppMethod, detour)` use the same inline hook engine as Rust mods and return the trampoline; the detour is a `[UnmanagedCallersOnly]` method. `Unhook`, `ReplacePointer`. Hooks, pointer patches and commands are removed when the mod unloads. Two hooks on the same function are refused.
+- Mods are loaded from memory into a collectible `AssemblyLoadContext`, so `reload <id>` and `hot_reload` work without locking the dll. Extra dlls next to the mod are loaded into the same context.
+- The IL2CPP GC does not see references stored in C# fields: keep game objects you hold across frames alive with `Pin()`.
+- C# mods show up in the menu as `C#`, use the same `config\<id>.toml`, console and dependency rules as Rust mods, and can depend on Rust mods and the other way round.
+
 ## How it works
 
 `version.dll` is a proxy for the Windows `version.dll` that Unity loads at start. It hooks `mono_jit_init_version`, and once the Mono domain exists it opens `Ferrite.dll`, registers internal calls and starts the managed runtime. Before anything else the preloader runs Cecil patchers and patches `UnityEngine.Application`'s static constructor to start mods before the first scene; patched assemblies are loaded into Mono's default context and Unity's own `mono_domain_assembly_open` / `mono_image_open_from_data_with_name` calls are redirected to them. The unpatched entrypoint is cached, so later starts skip Cecil. Then the C# side asks the Rust core for mods: Rust scans `Ferrite\mods`, finds every class derived from `Ferrite.Mod` through the Mono embedding API, reads `[Mod]`, skips disabled and duplicate ids, sorts by dependencies and returns the types in load order. Logging, the console and configs stay on the Rust side and are reached through internal calls.
 
-In IL2CPP games it hooks `il2cpp_init` instead. After the runtime starts it swaps the method pointers of `SceneManager.Internal_SceneLoaded`, `Application.CallLogCallback` and several per-frame methods (`UnitySynchronizationContext.ExecuteTasks`, `BeforeRenderHelper.Invoke`, `Canvas.SendWillRenderCanvases`, deduplicated by `Time.frameCount`), loads native mods from `Ferrite\mods` right after `il2cpp_init` and passes them a stable C ABI table (`ferrite_sdk::abi`).
+In IL2CPP games it hooks `il2cpp_init` instead. After the runtime starts it swaps the method pointers of `SceneManager.Internal_SceneLoaded`, `Application.CallLogCallback` and several per-frame methods (`UnitySynchronizationContext.ExecuteTasks`, `BeforeRenderHelper.Invoke`, `Canvas.SendWillRenderCanvases`, deduplicated by `Time.frameCount`), loads native mods from `Ferrite\mods` right after `il2cpp_init` and passes them a stable C ABI table (`ferrite_sdk::abi`). .NET assemblies in `Ferrite\mods` are recognised by their CLR header; for them Ferrite starts .NET with `hostfxr_initialize_for_runtime_config`, gets `Ferrite.Host.Init` from `Ferrite.Il2Cpp.dll` through `load_assembly_and_get_function_pointer`, and C# mods go through the same catalog, ABI table and per-mod tracking as Rust mods.
 
 The menu hooks `IDXGISwapChain::Present` with the same inline hook engine, draws egui with egui-directx11 and subclasses the game window for input. When the game sends no Direct3D 11 frames (other renderers, or the game is paused), the menu is drawn in a borderless window over the game's client area with its own Direct3D 11 device and a DirectComposition swap chain with per-pixel alpha; that window does not show over exclusive fullscreen. Game input is blocked and the cursor unlocked while it is open.
 

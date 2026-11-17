@@ -24,6 +24,8 @@ const FILES: &[(&str, &[u8])] = payload! {
     "Ferrite/core/Mono.Cecil.Rocks.dll",
     "Ferrite/core/MonoMod.RuntimeDetour.dll",
     "Ferrite/core/MonoMod.Utils.dll",
+    "Ferrite/core/Ferrite.Il2Cpp.dll",
+    "Ferrite/core/Ferrite.Il2Cpp.runtimeconfig.json",
 };
 
 fn main() {

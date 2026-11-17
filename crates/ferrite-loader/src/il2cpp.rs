@@ -104,7 +104,7 @@ pub fn boot(module: Module, root: PathBuf, config: LoaderConfig) {
     });
     console::register(
         "reload",
-        "<mod id> - Reloads a native mod from its dll.",
+        "<mod id> - Reloads a Rust or C# mod from its dll.",
         |args| match args.first() {
             Some(id) => {
                 native::reload(id);

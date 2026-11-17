@@ -31,7 +31,7 @@ pub fn command_line() -> String {
 pub use imp::LIBRARY_EXTENSION;
 
 #[cfg(windows)]
-pub use imp::{module_path, system_dir, wide};
+pub use imp::{from_wide_ptr, module_path, system_dir, wide};
 
 #[cfg(windows)]
 mod imp {
@@ -53,7 +53,7 @@ mod imp {
         s.as_ref().encode_wide().chain(Some(0)).collect()
     }
 
-    unsafe fn from_wide_ptr(p: *const u16) -> String {
+    pub unsafe fn from_wide_ptr(p: *const u16) -> String {
         if p.is_null() {
             return String::new();
         }

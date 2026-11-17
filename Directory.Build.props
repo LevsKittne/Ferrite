@@ -1,9 +1,18 @@
 <Project>
   <PropertyGroup>
+    <FerriteIl2Cpp>$(MSBuildProjectName.Contains('Il2Cpp'))</FerriteIl2Cpp>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FerriteIl2Cpp)' != 'True'">
     <GameDir Condition="'$(GameDir)' == ''">D:\Program Files (x86)\Steam\steamapps\common\Casualties Unknown</GameDir>
     <GameManaged Condition="'$(GameManaged)' == ''">$([System.IO.Directory]::GetDirectories('$(GameDir)', '*_Data')[0])\Managed</GameManaged>
-    <LibsDir>$(MSBuildThisFileDirectory)libs</LibsDir>
     <TargetFramework>net472</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FerriteIl2Cpp)' == 'True'">
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LibsDir>$(MSBuildThisFileDirectory)libs</LibsDir>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -11,7 +20,7 @@
     <DebugType>portable</DebugType>
     <PathMap>$(MSBuildThisFileDirectory)=ferrite/</PathMap>
   </PropertyGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(FerriteIl2Cpp)' != 'True'">
     <Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(GameManaged)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>

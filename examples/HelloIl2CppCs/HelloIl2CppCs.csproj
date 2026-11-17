@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HelloIl2CppCs</AssemblyName>
+    <RootNamespace>HelloIl2CppCs</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\Ferrite.Il2Cpp\Ferrite.Il2Cpp.csproj"><Private>false</Private></ProjectReference>
+  </ItemGroup>
+</Project>

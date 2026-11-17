@@ -151,6 +151,11 @@ pub fn native(level: Level, args: fmt::Arguments<'_>) {
     write(level, "Ferrite", &args.to_string());
 }
 
+#[cfg(windows)]
+macro_rules! debug {
+    ($($t:tt)*) => { $crate::log::native($crate::log::Level::Debug, format_args!($($t)*)) };
+}
+
 macro_rules! info {
     ($($t:tt)*) => { $crate::log::native($crate::log::Level::Info, format_args!($($t)*)) };
 }
@@ -163,6 +168,8 @@ macro_rules! error {
     ($($t:tt)*) => { $crate::log::native($crate::log::Level::Error, format_args!($($t)*)) };
 }
 
+#[cfg(windows)]
+pub(crate) use debug;
 pub(crate) use {error, info, warning};
 
 #[cfg(windows)]

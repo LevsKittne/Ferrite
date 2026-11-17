@@ -4,6 +4,11 @@ mod deps;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod detour;
 #[cfg(windows)]
+mod dotnet;
+#[cfg(not(windows))]
+#[path = "dotnet_stub.rs"]
+mod dotnet;
+#[cfg(windows)]
 mod iat;
 mod il2cpp;
 mod log;
