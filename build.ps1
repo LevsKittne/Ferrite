@@ -30,10 +30,14 @@ function Build($proj, $out) {
 Build "managed\Ferrite\Ferrite.csproj" "target\managed"
 Build "examples\HelloMod\HelloMod.csproj" "target\hello"
 Build "examples\HelloPatcher\HelloPatcher.csproj" "target\patcher"
+Build "managed\Ferrite.Il2Cpp\Ferrite.Il2Cpp.csproj" "target\il2cpp-managed"
+Build "examples\HelloIl2CppCs\HelloIl2CppCs.csproj" "target\hello-il2cpp-cs"
 Copy-Item (Join-Path $root "target\managed\Ferrite.dll") $core
 Copy-Item (Join-Path $root "libs\*.dll") $core
+Copy-Item (Join-Path $root "target\il2cpp-managed\Ferrite.Il2Cpp.dll"), (Join-Path $root "target\il2cpp-managed\Ferrite.Il2Cpp.runtimeconfig.json") $core
 Copy-Item (Join-Path $root "target\hello\HelloMod.dll") $examples
 Copy-Item (Join-Path $root "target\patcher\HelloPatcher.dll") $examples
+Copy-Item (Join-Path $root "target\hello-il2cpp-cs\HelloIl2CppCs.dll") $examples
 
 cargo build --release --manifest-path (Join-Path $root "Cargo.toml") -p ferrite-setup
 if ($LASTEXITCODE -ne 0) { throw "ferrite-setup build failed" }
