@@ -543,7 +543,7 @@ unsafe extern "C" fn icall_menu_open() -> bool {
 unsafe extern "C" fn icall_report_mods(rows: Ptr) {
     guarded((), |rt| {
         let text = unsafe { rt.mono.read_string(rows) }.unwrap_or_default();
-        let rows = text
+        let (bepinex, csharp): (Vec<_>, Vec<_>) = text
             .lines()
             .filter_map(|line| {
                 let mut f = line.split('\t');
@@ -553,10 +553,15 @@ unsafe extern "C" fn icall_report_mods(rows: Ptr) {
                     version: f.next()?.to_owned(),
                     author: f.next()?.to_owned(),
                     faulted: f.next() == Some("1"),
-                    kind: "C#",
+                    kind: if f.next() == Some("BepInEx") {
+                        "BepInEx"
+                    } else {
+                        "C#"
+                    },
                 })
             })
-            .collect();
-        overlay::set_mods("C#", rows);
+            .partition(|r| r.kind == "BepInEx");
+        overlay::set_mods("C#", csharp);
+        overlay::set_mods("BepInEx", bepinex);
     });
 }

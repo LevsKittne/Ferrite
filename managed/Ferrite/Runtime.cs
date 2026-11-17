@@ -12,6 +12,7 @@ namespace Ferrite {
         public const string Version = "0.2.1";
 
         static readonly List<Mod> mods = new List<Mod>();
+        static readonly Dictionary<string, string[][]> external = new Dictionary<string, string[][]>();
         static readonly Logger log = new Logger("Ferrite");
         static bool started;
         static float nextReloadCheck;
@@ -66,6 +67,24 @@ namespace Ferrite {
             host.AddComponent<Host>();
             Commands.RegisterBuiltins();
             LoadMods();
+            StartCompat();
+        }
+
+        static void StartCompat() {
+            var path = Path.Combine(CoreDir, "BepInEx.dll");
+            if (!File.Exists(path)) {
+                return;
+            }
+            try {
+                Assembly.LoadFrom(path).GetType("BepInEx.Bootstrap.Chainloader", true).GetMethod("Start", Type.EmptyTypes).Invoke(null, null);
+            } catch (Exception e) {
+                log.Error($"BepInEx compatibility layer failed: {(e is TargetInvocationException && e.InnerException != null ? e.InnerException : e)}");
+            }
+        }
+
+        public static void ReportExternal(string kind, IEnumerable<string[]> rows) {
+            external[kind] = (rows ?? new string[0][]).ToArray();
+            Report();
         }
 
         static void LoadMods() {
@@ -190,7 +209,9 @@ namespace Ferrite {
         }
 
         internal static void Report() {
-            var rows = mods.Select(m => string.Join("\t", new[] { m.Info.Id, m.Info.Name, m.Info.Version, m.Info.Author, m.Faulted ? "1" : "0" }.Select(Clean).ToArray()));
+            var rows = mods.Select(m => new[] { m.Info.Id, m.Info.Name, m.Info.Version, m.Info.Author, m.Faulted ? "1" : "0", "C#" })
+                .Concat(external.SelectMany(e => e.Value.Select(r => Enumerable.Range(0, 5).Select(i => r != null && i < r.Length ? r[i] : "").Concat(new[] { e.Key }).ToArray())))
+                .Select(r => string.Join("\t", r.Select(Clean).ToArray()));
             Native.ReportMods(string.Join("\n", rows.ToArray()));
         }
 

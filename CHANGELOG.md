@@ -2,17 +2,18 @@
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Added
+- IL2CPP: mods in C#. Ferrite hosts .NET 8+ through hostfxr (bundled `Ferrite\dotnet` or an installed runtime) and loads assemblies that reference the new `Ferrite.Il2Cpp` library: `Mod` with load, update, scene, config and unload callbacks, logger, config, commands, IL2CPP classes, methods, fields, objects, strings and arrays, inline hooks to `[UnmanagedCallersOnly]` methods. They appear in the menu as C#, hot reload through collectible load contexts (`examples/HelloIl2CppCs`).
+- IL2CPP class injection: `ferrite_sdk::inject::ClassBuilder` builds an `Il2CppClass` from a parent's layout with Rust methods and instance fields; injected classes resolve by name and by `System.Type`, so `AddComponent(Type)` works. Verified layouts for Unity 2021.2 to 6000 (metadata v29 to v31), checked against the game before use. Re-injecting after a mod reload rebinds the existing class.
+- ABI 3 (`register_class`, `stub`).
+- Optional BepInEx 5 compatibility package (`compat/BepInEx`, `dist\bepinex-compat`): runs BepInEx 5 plugins from `Ferrite\plugins` and `BepInEx\plugins` in Mono games, with BepInEx `.cfg` configs and plugins shown in the menu. Example: `examples/HelloBepInEx`.
 - 32-bit Windows builds (`i686-pc-windows-msvc`): 5-byte relative jumps in the inline hook engine, PE32 import table, x86 proxy exports.
 - Experimental Linux and macOS support: preloaded shared library with `dlsym` interposition and `tools/run_ferrite.sh`. Not tested on real systems yet; the menu stays Windows-only.
-=======
-### Fixed
-- The menu overlay window stays directly above the game window, so it no longer ends up behind the game when the game becomes topmost.
-
-### Added
 - `tests/TestGame`: a small Unity 2022.3 project that runs on Direct3D 11, Direct3D 12, Vulkan and OpenGL Core, with `tests/build-testgame.ps1` and `tests/capture-window.ps1` to build it and screenshot only the game window.
->>>>>>> feat/test-game
+
+### Fixed
+- A second inline hook on an already hooked function is refused; before it built a broken trampoline and unloading the first hook could crash the game.
+- The menu overlay window stays directly above the game window, so it no longer ends up behind the game when the game becomes topmost.
 
 ## [0.2.1] - 2026-11-16
 
