@@ -1,5 +1,6 @@
 use crate::config::{Entrypoint, LoaderConfig};
 use crate::log::{self, Level, error, info, warning};
+use crate::sys::Module;
 use crate::{console, native};
 use ferrite_sdk::il2cpp::{
     Class, FIELD_LITERAL, FIELD_STATIC, Il2Cpp, METHOD_STATIC, METHOD_VIRTUAL, Object, Ptr,
@@ -9,7 +10,6 @@ use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use crate::sys::Module;
 
 type UpdateFn = unsafe extern "C" fn(Ptr);
 type SceneLoadedFn = unsafe extern "C" fn(i32, i32, Ptr);

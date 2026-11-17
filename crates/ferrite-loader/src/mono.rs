@@ -1,5 +1,5 @@
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use crate::sys::{self, Module};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
 pub type Ptr = *mut c_void;
 

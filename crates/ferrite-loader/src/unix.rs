@@ -50,7 +50,8 @@ fn start() {
     let Some(game_dir) = exe.parent().map(PathBuf::from) else {
         return;
     };
-    let root = std::env::var_os("FERRITE_DIR").map_or_else(|| default_root(&game_dir), PathBuf::from);
+    let root =
+        std::env::var_os("FERRITE_DIR").map_or_else(|| default_root(&game_dir), PathBuf::from);
     if crate::attach(&game_dir, root) {
         crate::log::info!("dlsym interposed, waiting for the Unity runtime");
     }
@@ -58,10 +59,9 @@ fn start() {
 
 #[cfg(target_os = "macos")]
 fn default_root(game_dir: &std::path::Path) -> PathBuf {
-    let bundle = game_dir.ancestors().find(|p| {
-        p.extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("app"))
-    });
+    let bundle = game_dir
+        .ancestors()
+        .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")));
     bundle
         .and_then(std::path::Path::parent)
         .unwrap_or(game_dir)

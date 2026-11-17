@@ -92,7 +92,9 @@ mod entry {
     }
 
     fn start(module: HMODULE) {
-        let Some(game_dir) = sys::module_path(module).parent().map(std::path::Path::to_path_buf)
+        let Some(game_dir) = sys::module_path(module)
+            .parent()
+            .map(std::path::Path::to_path_buf)
         else {
             return;
         };

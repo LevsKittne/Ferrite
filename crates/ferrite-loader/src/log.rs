@@ -169,14 +169,16 @@ pub(crate) use {error, info, warning};
 mod terminal {
     use super::{Level, push_command};
     use crate::sys;
-    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{
+        GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Console::{
         AllocConsole, CONSOLE_MODE, ENABLE_EXTENDED_FLAGS, ENABLE_QUICK_EDIT_MODE, GetConsoleMode,
-        ReadConsoleW, SetConsoleMode, SetConsoleOutputCP, SetConsoleTextAttribute, SetConsoleTitleW,
-        WriteConsoleW,
+        ReadConsoleW, SetConsoleMode, SetConsoleOutputCP, SetConsoleTextAttribute,
+        SetConsoleTitleW, WriteConsoleW,
     };
     use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 

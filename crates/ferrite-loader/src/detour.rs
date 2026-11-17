@@ -279,7 +279,10 @@ pub unsafe fn install(
     let mut code = BlockEncoder::encode(BITNESS, block, BlockEncoderOptions::NONE)
         .map_err(|e| DetourError::Encode(e.to_string()))?
         .code_buffer;
-    let back = jump(trampoline as u64 + code.len() as u64, target_ip + len as u64);
+    let back = jump(
+        trampoline as u64 + code.len() as u64,
+        target_ip + len as u64,
+    );
     code.extend_from_slice(&back);
     if code.len() > TRAMPOLINE_SIZE {
         return Err(DetourError::Encode(
