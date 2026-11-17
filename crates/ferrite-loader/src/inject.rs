@@ -1,3 +1,4 @@
+use crate::detour::DetourError;
 use crate::log::{error, info, warning};
 use crate::native;
 use ferrite_sdk::abi::{self, Handle};
@@ -43,12 +44,27 @@ fn single_target(export: &str) -> Result<Ptr, String> {
 }
 
 unsafe fn install(export: &str, detour: Ptr, slot: &AtomicUsize) -> Result<(), String> {
-    let target = single_target(export)?;
-    let trampoline = unsafe { crate::detour::install(target, detour) }
-        .map_err(|e| format!("cannot hook the function behind {export}: {e}"))?;
-    slot.store(trampoline as usize, Ordering::Release);
-    info!("hooked the function behind {export} at {target:p}");
-    Ok(())
+    let mut target = single_target(export)?;
+    for _ in 0..4 {
+        match unsafe { crate::detour::install(target, detour) } {
+            Ok(trampoline) => {
+                slot.store(trampoline as usize, Ordering::Release);
+                info!("hooked the function behind {export} at {target:p}");
+                return Ok(());
+            }
+            Err(DetourError::TooShort) => {
+                let bytes = unsafe { std::slice::from_raw_parts(target.cast::<u8>(), 24) };
+                info!("{export}: {target:p} is too short, following its tail jump: {bytes:02x?}");
+                let next = unsafe { crate::detour::jump_targets(target, SCAN_LIMIT) };
+                let Some(&next) = next.last() else { break };
+                target = next as Ptr;
+            }
+            Err(e) => return Err(format!("cannot hook the function behind {export}: {e}")),
+        }
+    }
+    Err(format!(
+        "cannot hook the function behind {export}: it only forwards to code too short to hook"
+    ))
 }
 
 fn install_hooks() -> Result<(), String> {
@@ -57,11 +73,7 @@ fn install_hooks() -> Result<(), String> {
         .find(|e| native::symbol(e).is_some())
         .ok_or("il2cpp_class_from_il2cpp_type is not exported")?;
     unsafe {
-        install(
-            from_type,
-            from_type_detour as *const () as Ptr,
-            &FROM_TYPE,
-        )?;
+        install(from_type, from_type_detour as *const () as Ptr, &FROM_TYPE)?;
         install(
             "il2cpp_class_from_name",
             from_name_detour as *const () as Ptr,

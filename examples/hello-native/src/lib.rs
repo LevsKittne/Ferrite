@@ -1,8 +1,8 @@
 use ferrite_sdk::il2cpp::{Class, GcHandle, Il2Cpp, Object, Ptr};
 use ferrite_sdk::inject::ClassBuilder;
 use ferrite_sdk::{Context, Mod, export_mod};
-use std::sync::{Mutex, OnceLock, PoisonError};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 static FPS: AtomicU64 = AtomicU64::new(0);
@@ -124,13 +124,7 @@ fn destroy_host(ctx: &Context) {
     if let Some(il2cpp) = ctx.il2cpp()
         && let Some(destroy) = il2cpp.find_method("UnityEngine", "Object", "DestroyImmediate", 1)
     {
-        let _ = unsafe {
-            il2cpp.invoke(
-                destroy,
-                Object(std::ptr::null_mut()),
-                &mut [host.0],
-            )
-        };
+        let _ = unsafe { il2cpp.invoke(destroy, Object(std::ptr::null_mut()), &mut [host.0]) };
     }
 }
 
@@ -140,6 +134,40 @@ fn unity_log(il2cpp: &Il2Cpp, message: &str) -> bool {
     };
     let mut args = [il2cpp.string(message).0];
     unsafe { il2cpp.invoke(log, Object(std::ptr::null_mut()), &mut args) }.is_ok()
+}
+
+fn report_behaviour(ctx: &Context) {
+    let Some(il2cpp) = ctx.il2cpp() else { return };
+    let Some(class) = il2cpp.class("Ferrite.Examples", "FerriteBehaviour") else {
+        ctx.warning("FerriteBehaviour is not resolvable by name");
+        return;
+    };
+    let ty = il2cpp.type_object(class);
+    let type_name = il2cpp
+        .class_of(ty)
+        .and_then(|c| il2cpp.method(c, "get_FullName", 0))
+        .and_then(|m| unsafe { il2cpp.invoke(m, ty, &mut []) }.ok())
+        .and_then(|s| unsafe { il2cpp.read_string(s) })
+        .unwrap_or_default();
+    let host = HOST
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map(GcHandle::target);
+    let component = host.and_then(|host| {
+        let get = il2cpp.find_method("UnityEngine", "GameObject", "GetComponent", 1)?;
+        unsafe { il2cpp.invoke(get, host, &mut [ty.0]) }
+            .ok()
+            .filter(|c| !c.is_null())
+    });
+    let frames = component
+        .zip(frames_field(&il2cpp))
+        .map(|(c, f)| unsafe { il2cpp.get::<i32>(c, f) });
+    ctx.info(&format!(
+        "by name: {}, System.Type: {type_name}, GetComponent: {}, frames: {frames:?}",
+        il2cpp.full_class_name(class),
+        component.map_or("none".to_owned(), |c| format!("{:p}", c.0))
+    ));
 }
 
 unsafe extern "C" fn canvas_detour(method: Ptr) {
@@ -212,6 +240,11 @@ impl Mod for HelloNative {
             "hooktest",
             "Hooks Canvas.SendWillRenderCanvases and counts calls.",
             |ctx, _| hook_canvas(ctx),
+        );
+        ctx.command(
+            "behaviour",
+            "Looks up the injected FerriteBehaviour and prints its frame counter.",
+            |ctx, _| report_behaviour(ctx),
         );
         inject_behaviour(ctx);
         Self {
