@@ -2,9 +2,17 @@
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Added
 - 32-bit Windows builds (`i686-pc-windows-msvc`): 5-byte relative jumps in the inline hook engine, PE32 import table, x86 proxy exports.
 - Experimental Linux and macOS support: preloaded shared library with `dlsym` interposition and `tools/run_ferrite.sh`. Not tested on real systems yet; the menu stays Windows-only.
+=======
+### Fixed
+- The menu overlay window stays directly above the game window, so it no longer ends up behind the game when the game becomes topmost.
+
+### Added
+- `tests/TestGame`: a small Unity 2022.3 project that runs on Direct3D 11, Direct3D 12, Vulkan and OpenGL Core, with `tests/build-testgame.ps1` and `tests/capture-window.ps1` to build it and screenshot only the game window.
+>>>>>>> feat/test-game
 
 ## [0.2.1] - 2026-11-16
 
