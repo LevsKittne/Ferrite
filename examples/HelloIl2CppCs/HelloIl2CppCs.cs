@@ -14,6 +14,7 @@ namespace HelloIl2CppCs {
 
         readonly Stopwatch clock = Stopwatch.StartNew();
         int frames;
+        long updates;
         double fps;
         Il2CppMethod canvas;
 
@@ -30,7 +31,7 @@ namespace HelloIl2CppCs {
                 }
                 Logger.Info(Config.Get("greeting", DefaultGreeting));
             });
-            Command("csfps", "Prints frames per second measured by the C# mod.", _ => Logger.Info($"{fps:F1} fps"));
+            Command("csfps", "Prints frames per second measured by the C# mod.", _ => Logger.Info($"{fps:F1} fps, {updates} updates since load"));
             Command("cshooktest", "Hooks Canvas.SendWillRenderCanvases from C# and counts calls.", _ => HookCanvas());
         }
 
@@ -70,6 +71,7 @@ namespace HelloIl2CppCs {
 
         public override void OnUpdate() {
             frames++;
+            updates++;
             var elapsed = clock.Elapsed.TotalSeconds;
             if (elapsed >= 1.0) {
                 fps = frames / elapsed;

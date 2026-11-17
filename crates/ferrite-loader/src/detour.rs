@@ -37,6 +37,7 @@ pub enum DetourError {
     Protect,
     NotHooked,
     Overwritten,
+    AlreadyHooked,
 }
 
 impl fmt::Display for DetourError {
@@ -48,6 +49,9 @@ impl fmt::Display for DetourError {
             Self::NoMemoryNearTarget => f.write_str("no free memory within 2 GB of the target"),
             Self::Protect => f.write_str("cannot change page protection"),
             Self::NotHooked => f.write_str("no hook installed there"),
+            Self::AlreadyHooked => {
+                f.write_str("already hooked by another mod, hooks on one function do not stack")
+            }
             Self::Overwritten => {
                 f.write_str("hooked again by someone else, remove that hook first")
             }
@@ -162,6 +166,14 @@ pub unsafe fn install(
     let _guard = PATCH_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|i| i.target == target as usize)
+    {
+        return Err(DetourError::AlreadyHooked);
+    }
     let target_ip = target as u64;
     let (instructions, len) = prologue(target_ip)?;
     let trampoline = allocate_near(target as usize).ok_or(DetourError::NoMemoryNearTarget)?;
@@ -246,6 +258,7 @@ mod tests {
         let original: extern "C" fn() -> u64 = unsafe { std::mem::transmute(trampoline) };
         assert_eq!(target(), 2);
         assert_eq!(original(), 1);
+        assert!(unsafe { install(page.cast(), (two as *const ()).cast()) }.is_err());
         unsafe { uninstall(page.cast()) }.unwrap();
         assert_eq!(target(), 1);
         assert!(unsafe { uninstall(page.cast()) }.is_err());
