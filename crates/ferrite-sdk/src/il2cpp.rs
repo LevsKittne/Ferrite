@@ -4,15 +4,19 @@ use std::ffi::{CString, c_char, c_void};
 pub type Ptr = *mut c_void;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Class(pub Ptr);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Method(pub Ptr);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Object(pub Ptr);
 
 unsafe impl Send for Class {}
+unsafe impl Sync for Class {}
 unsafe impl Send for Method {}
 
 impl Method {
@@ -44,7 +48,7 @@ macro_rules! api {
         #[allow(clippy::struct_field_names)]
         #[derive(Debug, Clone, Copy)]
         pub struct Il2Cpp {
-            $($field: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
+            $(pub(crate) $field: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
         }
 
         unsafe impl Send for Il2Cpp {}
@@ -109,12 +113,15 @@ api! {
     resolve_icall: fn(*const c_char) -> Ptr;
     array_length: fn(Ptr) -> u32;
     array_new: fn(Ptr, usize) -> Ptr;
+    type_get_object: fn(Ptr) -> Ptr;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Field(pub Ptr);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Image(pub Ptr);
 
 unsafe impl Send for Field {}
@@ -346,6 +353,11 @@ impl Il2Cpp {
 
     pub unsafe fn set_static<T: Copy>(&self, field: Field, mut value: T) {
         unsafe { (self.field_static_set_value)(field.0, (&raw mut value).cast()) };
+    }
+
+    #[must_use]
+    pub fn type_object(&self, class: Class) -> Object {
+        Object(unsafe { (self.type_get_object)((self.class_get_type)(class.0)) })
     }
 
     #[must_use]
