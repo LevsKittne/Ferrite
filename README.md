@@ -154,6 +154,12 @@ In IL2CPP games it hooks `il2cpp_init` instead. After the runtime starts it swap
 
 The menu hooks `IDXGISwapChain::Present` with the same inline hook engine, draws egui with egui-directx11 and subclasses the game window for input. When the game sends no Direct3D 11 frames (other renderers, or the game is paused), the menu is drawn in a borderless window over the game's client area with its own Direct3D 11 device and a DirectComposition swap chain with per-pixel alpha; that window does not show over exclusive fullscreen. Game input is blocked and the cursor unlocked while it is open.
 
+## Platforms
+
+- **Windows x64**: the main target, everything above.
+- **Windows 32-bit** (`i686-pc-windows-msvc`): the same `version.dll`, built with `cargo build --release --target i686-pc-windows-msvc -p ferrite-loader` and put next to a 32-bit game instead of the x64 one (the installer ships only x64). The inline hooks use a 5-byte relative jump. Checked on a 32-bit Unity 2022.3 Mono player: C# mod, console, configs and the Direct3D 11 menu. 32-bit IL2CPP is not tested.
+- **Linux and macOS** (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`): Unity has no `version.dll` there, so Ferrite is a shared library preloaded with `LD_PRELOAD` / `DYLD_INSERT_LIBRARIES` that intercepts `dlsym` to catch `mono_jit_init_version` / `il2cpp_init`. Build with `cargo build --release -p ferrite-loader` on that system, copy `libversion.so` / `libversion.dylib` next to the game as `libferrite.so` / `libferrite.dylib` together with `tools/run_ferrite.sh` and the `Ferrite` folder, and start the game with `./run_ferrite.sh` (Steam: `./run_ferrite.sh %command%`). `FERRITE_DIR` overrides the `Ferrite` folder, `FERRITE_GAME` the executable. The console reads commands from the terminal; the in-game menu is Windows-only. Native mods are `.so` / `.dylib`. **This port compiles but has never been run on Linux or macOS**: treat it as experimental. On macOS, games with the hardened runtime ignore `DYLD_INSERT_LIBRARIES`, and Apple Silicon builds are not supported (the hook engine is x86 only).
+
 ## Building
 
 Requires Rust (stable, MSVC), the .NET SDK and any Unity Mono game for the Unity reference assemblies. `tools\send-command.ps1` sends a console command to a running game without focusing its window.

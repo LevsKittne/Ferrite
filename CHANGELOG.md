@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- 32-bit Windows builds (`i686-pc-windows-msvc`): 5-byte relative jumps in the inline hook engine, PE32 import table, x86 proxy exports.
+- Experimental Linux and macOS support: preloaded shared library with `dlsym` interposition and `tools/run_ferrite.sh`. Not tested on real systems yet; the menu stays Windows-only.
+
 ## [0.2.1] - 2026-11-16
 
 ### Added
