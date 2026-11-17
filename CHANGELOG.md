@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The menu overlay window stays directly above the game window, so it no longer ends up behind the game when the game becomes topmost.
+
+### Added
+- `tests/TestGame`: a small Unity 2022.3 project that runs on Direct3D 11, Direct3D 12, Vulkan and OpenGL Core, with `tests/build-testgame.ps1` and `tests/capture-window.ps1` to build it and screenshot only the game window.
+
 ## [0.2.1] - 2026-11-16
 
 ### Added
