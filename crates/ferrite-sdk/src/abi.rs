@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 pub const MIN_ABI_VERSION: u32 = 1;
 
 pub const INFO_SYMBOL: &[u8] = b"ferrite_mod_info\0";
@@ -78,6 +78,13 @@ pub struct Api {
     pub execute: unsafe extern "C" fn(line: *const u8, len: usize),
     pub directory:
         unsafe extern "C" fn(handle: Handle, kind: i32, buffer: *mut u8, capacity: usize) -> isize,
+    pub register_class: unsafe extern "C" fn(
+        handle: Handle,
+        class: *mut c_void,
+        namespace: *const c_char,
+        name: *const c_char,
+    ) -> i64,
+    pub stub: unsafe extern "C" fn(kind: i32) -> *mut c_void,
 }
 
 pub type InfoFn = unsafe extern "C" fn() -> *const ModInfo;
@@ -101,3 +108,6 @@ pub const DIR_ROOT: i32 = 0;
 pub const DIR_GAME: i32 = 1;
 pub const DIR_MOD: i32 = 2;
 pub const DIR_CONFIG: i32 = 3;
+
+pub const STUB_METHOD: i32 = 0;
+pub const STUB_INVOKER: i32 = 1;

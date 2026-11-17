@@ -4,6 +4,7 @@ mod deps;
 mod detour;
 mod iat;
 mod il2cpp;
+mod inject;
 mod log;
 mod mods;
 mod mono;

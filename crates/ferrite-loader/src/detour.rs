@@ -212,9 +212,32 @@ pub unsafe fn uninstall(target: *mut c_void) -> Result<(), DetourError> {
     Ok(())
 }
 
+pub unsafe fn jump_targets(start: *const c_void, limit: usize) -> Vec<usize> {
+    let bytes = unsafe { std::slice::from_raw_parts(start.cast::<u8>(), limit) };
+    let mut decoder = Decoder::with_ip(64, bytes, start as u64, DecoderOptions::NONE);
+    let mut targets = Vec::new();
+    while decoder.can_decode() {
+        let instruction = decoder.decode();
+        if instruction.is_invalid() {
+            break;
+        }
+        match instruction.flow_control() {
+            FlowControl::Call => targets.push(instruction.near_branch_target() as usize),
+            FlowControl::UnconditionalBranch => {
+                targets.push(instruction.near_branch_target() as usize);
+                break;
+            }
+            FlowControl::Return | FlowControl::Interrupt | FlowControl::IndirectBranch => break,
+            _ => {}
+        }
+    }
+    targets.retain(|&t| t != 0);
+    targets
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{JUMP_LEN, absolute_jump, install, prologue, uninstall};
+    use super::{JUMP_LEN, absolute_jump, install, jump_targets, prologue, uninstall};
     use windows_sys::Win32::System::Memory::{
         MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, VirtualAlloc,
     };
@@ -274,6 +297,17 @@ mod tests {
         let (instructions, len) = prologue(code.as_ptr() as u64).unwrap();
         assert_eq!(instructions.len(), 4);
         assert_eq!(len, 14);
+    }
+
+    #[test]
+    fn finds_call_and_tail_jump_targets() {
+        let mut code = [0xCCu8; 64];
+        code[..14].copy_from_slice(&[
+            0x48, 0x83, 0xEC, 0x28, 0xE8, 0x10, 0x00, 0x00, 0x00, 0xE9, 0x20, 0x00, 0x00, 0x00,
+        ]);
+        let base = code.as_ptr() as usize;
+        let targets = unsafe { jump_targets(code.as_ptr().cast(), code.len()) };
+        assert_eq!(targets, vec![base + 9 + 0x10, base + 14 + 0x20]);
     }
 
     #[test]

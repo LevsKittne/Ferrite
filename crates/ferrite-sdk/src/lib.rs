@@ -1,5 +1,6 @@
 pub mod abi;
 pub mod il2cpp;
+pub mod inject;
 
 use std::collections::HashMap;
 use std::ffi::{CString, c_void};
@@ -11,6 +12,11 @@ type Handler = Box<dyn Fn(&Context, &[&str]) + Send>;
 
 static COMMANDS: Mutex<Option<HashMap<String, Handler>>> = Mutex::new(None);
 static CONTEXT: Mutex<Option<Context>> = Mutex::new(None);
+
+#[must_use]
+pub fn context() -> Option<Context> {
+    *CONTEXT.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Context {

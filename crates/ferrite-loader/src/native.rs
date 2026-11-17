@@ -115,11 +115,14 @@ macro_rules! api_table {
             patch_pointer: api_patch_pointer,
             execute: api_execute,
             directory: api_directory,
+            register_class: crate::inject::api_register_class,
+            stub: crate::inject::api_stub,
         }
     };
 }
 
 static API: Api = api_table!(abi::ABI_VERSION);
+static API_V2: Api = api_table!(2);
 static API_V1: Api = api_table!(1);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -321,10 +324,10 @@ fn load(entry: &Entry, slot: Option<usize>) -> bool {
         entry.id,
         entry.file.display()
     );
-    let api = if entry.abi >= abi::ABI_VERSION {
-        &raw const API
-    } else {
-        &raw const API_V1
+    let api = match entry.abi {
+        abi::ABI_VERSION.. => &raw const API,
+        2 => &raw const API_V2,
+        _ => &raw const API_V1,
     };
     if unsafe { load_fn(api, handle as Handle) } {
         let callbacks = Callbacks {
