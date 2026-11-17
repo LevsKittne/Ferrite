@@ -197,10 +197,11 @@ fn mod_entry(
                     });
             }
             ui.horizontal(|ui| {
-                if ui
-                    .button("Reload")
-                    .on_hover_text("Reload the mod from its dll")
-                    .clicked()
+                if m.kind != "BepInEx"
+                    && ui
+                        .button("Reload")
+                        .on_hover_text("Reload the mod from its dll")
+                        .clicked()
                 {
                     log::push_command(format!("reload {}", m.id));
                 }

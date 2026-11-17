@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>BepInEx</AssemblyName>
+    <RootNamespace>BepInEx</RootNamespace>
+    <Version>5.4.23.2</Version>
+    <InformationalVersion>5.4.23.2 Ferrite compatibility layer</InformationalVersion>
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\Ferrite\Ferrite.csproj"><Private>false</Private></ProjectReference>
+    <Reference Include="Mono.Cecil"><HintPath>$(LibsDir)\Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
