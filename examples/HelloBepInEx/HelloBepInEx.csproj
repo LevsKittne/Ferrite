@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HelloBepInEx</AssemblyName>
+    <RootNamespace>HelloBepInEx</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(BepInExDll)' == ''">
+    <ProjectReference Include="..\..\compat\BepInEx\BepInEx.csproj"><Private>false</Private></ProjectReference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(BepInExDll)' != ''">
+    <Reference Include="BepInEx"><HintPath>$(BepInExDll)</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

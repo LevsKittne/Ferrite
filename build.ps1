@@ -1,6 +1,7 @@
 param(
     [string]$GameDir = "D:\Program Files (x86)\Steam\steamapps\common\Casualties Unknown",
-    [string]$Install
+    [string]$Install,
+    [switch]$BepInEx
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,7 @@ $dist = Join-Path $root "dist"
 $core = Join-Path $dist "Ferrite\core"
 $examples = Join-Path $dist "examples"
 $setup = Join-Path $dist "setup"
+$compat = Join-Path $dist "bepinex-compat"
 
 $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
 $rustup = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE ".rustup" }
@@ -35,6 +37,12 @@ Copy-Item (Join-Path $root "libs\*.dll") $core
 Copy-Item (Join-Path $root "target\hello\HelloMod.dll") $examples
 Copy-Item (Join-Path $root "target\patcher\HelloPatcher.dll") $examples
 
+Build "compat\BepInEx\BepInEx.csproj" "target\compat"
+Build "examples\HelloBepInEx\HelloBepInEx.csproj" "target\hellobep"
+New-Item -ItemType Directory -Force (Join-Path $compat "Ferrite\core"), (Join-Path $compat "Ferrite\plugins"), (Join-Path $compat "examples") | Out-Null
+Copy-Item (Join-Path $root "target\compat\BepInEx.dll") (Join-Path $compat "Ferrite\core")
+Copy-Item (Join-Path $root "target\hellobep\HelloBepInEx.dll") (Join-Path $compat "examples")
+
 cargo build --release --manifest-path (Join-Path $root "Cargo.toml") -p ferrite-setup
 if ($LASTEXITCODE -ne 0) { throw "ferrite-setup build failed" }
 Copy-Item (Join-Path $root "target\release\Ferrite-Setup.exe") $setup
@@ -43,5 +51,9 @@ if ($Install) {
     Copy-Item (Join-Path $dist "version.dll"), (Join-Path $dist "Ferrite") $Install -Recurse -Force
     New-Item -ItemType Directory -Force (Join-Path $Install "Ferrite\mods") | Out-Null
     Copy-Item (Join-Path $examples "*.dll") (Join-Path $Install "Ferrite\mods")
+    if ($BepInEx) {
+        Copy-Item (Join-Path $compat "Ferrite") $Install -Recurse -Force
+        Copy-Item (Join-Path $compat "examples\*.dll") (Join-Path $Install "Ferrite\plugins")
+    }
     Write-Host "installed to $Install"
 }
