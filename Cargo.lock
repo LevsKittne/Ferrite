@@ -186,6 +186,7 @@ dependencies = [
  "egui-directx11",
  "ferrite-sdk",
  "iced-x86",
+ "libc",
  "serde",
  "toml",
  "toml_edit",

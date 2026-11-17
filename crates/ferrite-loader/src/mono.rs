@@ -1,6 +1,5 @@
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use windows_sys::Win32::Foundation::HMODULE;
-use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
+use crate::sys::{self, Module};
 
 pub type Ptr = *mut c_void;
 
@@ -18,12 +17,13 @@ macro_rules! api {
         }
 
         impl Mono {
-            pub fn load(module: HMODULE) -> Result<Self, &'static str> {
+            pub fn load(module: Module) -> Result<Self, &'static str> {
                 Ok(Self {
                     $($field: {
                         let name = concat!("mono_", stringify!($field), "\0");
-                        let f = unsafe { GetProcAddress(module, name.as_ptr()) }.ok_or(name)?;
-                        unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, unsafe extern "C" fn($($arg),*) $(-> $ret)?>(f) }
+                        let symbol = CStr::from_bytes_with_nul(name.as_bytes()).map_err(|_| name)?;
+                        let f = sys::symbol(module, symbol).ok_or(name)?;
+                        unsafe { std::mem::transmute::<*mut c_void, unsafe extern "C" fn($($arg),*) $(-> $ret)?>(f) }
                     },)*
                 })
             }

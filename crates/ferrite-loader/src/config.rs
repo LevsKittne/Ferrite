@@ -274,12 +274,14 @@ fn flatten(table: &Table, prefix: &str, out: &mut Vec<(String, String)>) {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Setting {
     pub key: String,
     pub value: String,
     pub description: String,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn comment(table: &Table, key: &str) -> String {
     table
         .key(key)
@@ -295,6 +297,7 @@ fn comment(table: &Table, key: &str) -> String {
         .unwrap_or_default()
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn settings(table: &Table, prefix: &str, out: &mut Vec<Setting>) {
     for (key, item) in table {
         let full = if prefix.is_empty() {
@@ -314,6 +317,7 @@ fn settings(table: &Table, prefix: &str, out: &mut Vec<Setting>) {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn edit_loader(path: &Path, edit: impl FnOnce(&mut DocumentMut)) -> std::io::Result<()> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut doc: DocumentMut = text.parse().map_err(std::io::Error::other)?;
@@ -321,6 +325,7 @@ pub fn edit_loader(path: &Path, edit: impl FnOnce(&mut DocumentMut)) -> std::io:
     std::fs::write(path, doc.to_string())
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn read_loader(path: &Path) -> LoaderConfig {
     std::fs::read_to_string(path)
         .ok()
@@ -329,6 +334,7 @@ pub fn read_loader(path: &Path) -> LoaderConfig {
 }
 
 impl ModConfigs {
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn settings(&mut self, id: &str) -> Vec<Setting> {
         let mut out = Vec::new();
         settings(self.file(id).doc.as_table(), "", &mut out);

@@ -2,7 +2,7 @@ use crate::config::{self, Kind};
 use crate::console;
 use crate::deps::{self, Catalog, Dependency, Node};
 use crate::log::{self, Level, error, info, warning};
-use crate::sys;
+use crate::sys::{self, Module};
 use ferrite_sdk::abi::{
     self, Api, CommandFn, ConfigFn, Handle, InfoFn, LoadFn, ModInfo, SceneFn, UnloadFn, UpdateFn,
 };
@@ -12,11 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
-use windows_sys::Win32::Foundation::{FreeLibrary, HMODULE};
-use windows_sys::Win32::System::LibraryLoader::{
-    AddDllDirectory, GetProcAddress, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_USER_DIRS, LoadLibraryExW,
-};
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -126,14 +121,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn set_symbol_module(module: HMODULE) {
+pub fn set_symbol_module(module: Module) {
     SYMBOLS.store(module as usize, Ordering::Release);
 }
 
 pub fn symbol(name: &str) -> Option<*mut c_void> {
-    let module = SYMBOLS.load(Ordering::Acquire) as HMODULE;
+    let module = SYMBOLS.load(Ordering::Acquire) as Module;
     let name = std::ffi::CString::new(name).ok()?;
-    unsafe { GetProcAddress(module, name.as_ptr().cast()) }.map(|f| f as *mut c_void)
+    sys::symbol(module, &name)
 }
 
 pub unsafe fn hook(target: *mut c_void, detour: *mut c_void) -> Option<*mut c_void> {
@@ -165,39 +160,25 @@ fn stamp(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-fn open_library(file: &Path) -> Option<HMODULE> {
+fn open_library(file: &Path) -> Option<Module> {
     let hot = DIRS.get().is_some_and(|d| d.hot_reload);
-    let module = if let Some(dirs) = DIRS.get().filter(|_| hot) {
+    if let Some(dirs) = DIRS.get().filter(|_| hot) {
         let n = SHADOW.fetch_add(1, Ordering::Relaxed);
         let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned());
-        let copy = dirs
-            .cache
-            .join(format!("{}.{n}.dll", stem.unwrap_or_default()));
+        let copy = dirs.cache.join(format!(
+            "{}.{n}.{}",
+            stem.unwrap_or_default(),
+            sys::LIBRARY_EXTENSION
+        ));
         std::fs::create_dir_all(&dirs.cache).ok()?;
         if let Err(e) = std::fs::copy(file, &copy) {
             warning!("cannot shadow-copy {}: {e}", file.display());
             return None;
         }
-        if let Some(parent) = file.parent() {
-            unsafe { AddDllDirectory(sys::wide(parent).as_ptr()) };
-        }
-        unsafe {
-            LoadLibraryExW(
-                sys::wide(&copy).as_ptr(),
-                std::ptr::null_mut(),
-                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS,
-            )
-        }
+        sys::open_library(&copy, file.parent())
     } else {
-        unsafe {
-            LoadLibraryExW(
-                sys::wide(file).as_ptr(),
-                std::ptr::null_mut(),
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-            )
-        }
-    };
-    (!module.is_null()).then_some(module)
+        sys::open_library(file, None)
+    }
 }
 
 fn inspect(file: &Path) -> Option<Entry> {
@@ -205,13 +186,11 @@ fn inspect(file: &Path) -> Option<Entry> {
         warning!("cannot load {}", file.display());
         return None;
     };
-    let Some(info_fn) = (unsafe { GetProcAddress(module, abi::INFO_SYMBOL.as_ptr()) }) else {
+    let Some(info_fn) = export::<InfoFn>(module, abi::INFO_SYMBOL) else {
         warning!("skipping {}: no ferrite_mod_info export", file.display());
-        unsafe { FreeLibrary(module) };
+        sys::free_library(module);
         return None;
     };
-    let info_fn: InfoFn =
-        unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, InfoFn>(info_fn) };
     let info: &ModInfo = unsafe { info_fn().as_ref() }?;
     if !(abi::MIN_ABI_VERSION..=abi::ABI_VERSION).contains(&info.abi) {
         error!(
@@ -221,13 +200,13 @@ fn inspect(file: &Path) -> Option<Entry> {
             abi::MIN_ABI_VERSION,
             abi::ABI_VERSION
         );
-        unsafe { FreeLibrary(module) };
+        sys::free_library(module);
         return None;
     }
     let id = unsafe { read_cstr(info.id) };
     if id.is_empty() {
         error!("{} has an empty mod id, skipped", file.display());
-        unsafe { FreeLibrary(module) };
+        sys::free_library(module);
         return None;
     }
     Some(Entry {
@@ -257,7 +236,7 @@ pub fn load_all(root: &Path, mods_dir: &Path, disabled: &[String], hot_reload: b
     let started = Instant::now();
     let mut catalog = Catalog::new(disabled, &crate::game_name());
     let mut modules = Vec::new();
-    for file in deps::dlls(mods_dir) {
+    for file in deps::files(mods_dir, sys::LIBRARY_EXTENSION) {
         if let Some(entry) = inspect(&file) {
             modules.push(entry.module);
             catalog.add(entry);
@@ -268,7 +247,7 @@ pub fn load_all(root: &Path, mods_dir: &Path, disabled: &[String], hot_reload: b
         .into_iter()
         .filter(|m| !ordered.iter().any(|e| e.module == *m))
     {
-        unsafe { FreeLibrary(module as HMODULE) };
+        sys::free_library(module as Module);
     }
     for entry in ordered {
         load(&entry, None);
@@ -282,16 +261,16 @@ pub fn load_all(root: &Path, mods_dir: &Path, disabled: &[String], hot_reload: b
     );
 }
 
-fn export<T>(module: HMODULE, name: &[u8]) -> Option<T> {
-    let f = unsafe { GetProcAddress(module, name.as_ptr()) }?;
-    Some(unsafe { std::mem::transmute_copy::<unsafe extern "system" fn() -> isize, T>(&f) })
+fn export<T>(module: Module, name: &[u8]) -> Option<T> {
+    let f = sys::symbol(module, CStr::from_bytes_with_nul(name).ok()?)?;
+    Some(unsafe { std::mem::transmute_copy::<*mut c_void, T>(&f) })
 }
 
 fn load(entry: &Entry, slot: Option<usize>) -> bool {
-    let module = entry.module as HMODULE;
+    let module = entry.module as Module;
     let Some(load_fn) = export::<LoadFn>(module, abi::LOAD_SYMBOL) else {
         error!("{} has no ferrite_mod_load export, skipped", entry.id);
-        unsafe { FreeLibrary(module) };
+        sys::free_library(module);
         return false;
     };
     let record = Loaded {
@@ -383,7 +362,7 @@ fn release(handle: usize) {
         std::mem::take(&mut m.module)
     });
     if let Some(module) = module.filter(|&m| m != 0) {
-        unsafe { FreeLibrary(module as HMODULE) };
+        sys::free_library(module as Module);
     }
 }
 
@@ -418,7 +397,7 @@ pub fn reload(id: &str) -> bool {
     };
     if !entry.id.eq_ignore_ascii_case(id) {
         error!("cannot reload {id}: the new build has id {}", entry.id);
-        unsafe { FreeLibrary(entry.module as HMODULE) };
+        sys::free_library(entry.module as Module);
         return false;
     }
     let ok = load(&entry, Some(index));

@@ -14,8 +14,11 @@ macro_rules! forward {
             #[allow(non_snake_case)]
             #[unsafe(no_mangle)]
             #[unsafe(naked)]
-            pub unsafe extern "system" fn $name() {
+            pub unsafe extern "C" fn $name() {
+                #[cfg(target_arch = "x86_64")]
                 core::arch::naked_asm!("jmp qword ptr [rip + {0}]", sym slots::$name);
+                #[cfg(target_arch = "x86")]
+                core::arch::naked_asm!("jmp dword ptr [{0}]", sym slots::$name);
             }
         )*
 

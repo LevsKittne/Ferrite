@@ -219,7 +219,11 @@ enum Mark {
 }
 
 pub fn dlls(dir: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    files(dir, "dll")
+}
+
+pub fn files(dir: &Path, extension: &str) -> Vec<PathBuf> {
+    fn walk(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -227,17 +231,17 @@ pub fn dlls(dir: &Path) -> Vec<PathBuf> {
         entries.sort();
         for path in entries {
             if path.is_dir() {
-                walk(&path, out);
+                walk(&path, extension, out);
             } else if path
                 .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("dll"))
+                .is_some_and(|e| e.eq_ignore_ascii_case(extension))
             {
                 out.push(path);
             }
         }
     }
     let mut out = Vec::new();
-    walk(dir, &mut out);
+    walk(dir, extension, &mut out);
     out
 }
 

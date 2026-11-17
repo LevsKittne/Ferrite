@@ -9,7 +9,7 @@ use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use windows_sys::Win32::Foundation::HMODULE;
+use crate::sys::Module;
 
 type UpdateFn = unsafe extern "C" fn(Ptr);
 type SceneLoadedFn = unsafe extern "C" fn(i32, i32, Ptr);
@@ -86,7 +86,7 @@ fn update_cursor() {
     }
 }
 
-pub fn boot(module: HMODULE, root: PathBuf, config: LoaderConfig) {
+pub fn boot(module: Module, root: PathBuf, config: LoaderConfig) {
     native::set_symbol_module(module);
     let Some(api) = Il2Cpp::from_resolver(native::symbol) else {
         error!("il2cpp exports missing in GameAssembly.dll");

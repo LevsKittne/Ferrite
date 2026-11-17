@@ -1,17 +1,26 @@
 mod config;
 mod console;
 mod deps;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod detour;
+#[cfg(windows)]
 mod iat;
 mod il2cpp;
 mod log;
 mod mods;
 mod mono;
 mod native;
+#[cfg(windows)]
 mod overlay;
 mod patched;
+#[cfg(windows)]
 mod proxy;
 mod sys;
+#[cfg(unix)]
+mod unix;
+
+#[cfg(unix)]
+use unix::overlay;
 
 use crate::config::{Kind, LoaderConfig, ModConfigs};
 use crate::log::{Level, error, info, warning};
@@ -21,13 +30,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use windows_sys::Win32::Foundation::{FALSE, HMODULE, TRUE};
-use windows_sys::Win32::System::Environment::GetCommandLineW;
-use windows_sys::Win32::System::LibraryLoader::{
-    DisableThreadLibraryCalls, GetModuleHandleW, GetProcAddress,
-};
-use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows_sys::core::BOOL;
+use sys::Module;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const ROOT_DIR: &str = "Ferrite";
@@ -59,34 +62,69 @@ static MONO_MODULE: AtomicUsize = AtomicUsize::new(0);
 static ORIGINAL_IL2CPP_INIT: AtomicUsize = AtomicUsize::new(0);
 static IL2CPP_MODULE: AtomicUsize = AtomicUsize::new(0);
 
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllMain(
-    module: HMODULE,
-    reason: u32,
-    _reserved: *mut c_void,
-) -> BOOL {
-    if reason != DLL_PROCESS_ATTACH {
-        return TRUE;
+#[cfg(windows)]
+mod entry {
+    use super::{ROOT_DIR, attach, get_proc_address_hook};
+    use crate::log::{error, info};
+    use crate::{iat, proxy, sys};
+    use std::ffi::c_void;
+    use std::panic::catch_unwind;
+    use windows_sys::Win32::Foundation::{FALSE, HMODULE, TRUE};
+    use windows_sys::Win32::System::LibraryLoader::{DisableThreadLibraryCalls, GetModuleHandleW};
+    use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
+    use windows_sys::core::BOOL;
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "system" fn DllMain(
+        module: HMODULE,
+        reason: u32,
+        _reserved: *mut c_void,
+    ) -> BOOL {
+        if reason != DLL_PROCESS_ATTACH {
+            return TRUE;
+        }
+        unsafe { DisableThreadLibraryCalls(module) };
+        if proxy::init().is_err() {
+            return FALSE;
+        }
+        let _ = catch_unwind(|| start(module));
+        TRUE
     }
-    unsafe { DisableThreadLibraryCalls(module) };
-    if proxy::init().is_err() {
-        return FALSE;
+
+    fn start(module: HMODULE) {
+        let Some(game_dir) = sys::module_path(module).parent().map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        if !attach(&game_dir, game_dir.join(ROOT_DIR)) {
+            return;
+        }
+        let player = unsafe { GetModuleHandleW(sys::wide("UnityPlayer.dll").as_ptr()) };
+        let target = if player.is_null() {
+            unsafe { GetModuleHandleW(std::ptr::null()) }
+        } else {
+            player
+        };
+        match unsafe {
+            iat::hook(
+                target,
+                "kernel32.dll",
+                "GetProcAddress",
+                get_proc_address_hook as *const () as usize,
+            )
+        } {
+            Some(_) => info!("GetProcAddress hooked"),
+            None => error!("failed to hook GetProcAddress"),
+        }
     }
-    let _ = catch_unwind(|| attach(module));
-    TRUE
 }
 
-fn attach(module: HMODULE) {
-    let Some(game_dir) = sys::module_path(module).parent().map(Path::to_path_buf) else {
-        return;
-    };
-    let root = game_dir.join(ROOT_DIR);
+pub(crate) fn attach(game_dir: &Path, root: PathBuf) -> bool {
     if !root.is_dir() || !is_unity_player() {
-        return;
+        return false;
     }
     let (config, config_error) = LoaderConfig::load(&root.join("ferrite.toml"));
-    let command_line = unsafe { sys::from_wide_ptr(GetCommandLineW()) };
-    let enabled = config.loader.enabled && !command_line.contains("--no-mods");
+    let enabled = config.loader.enabled && !sys::command_line().contains("--no-mods");
     log::init(
         &root.join("log.txt"),
         enabled && config.loader.console,
@@ -101,68 +139,70 @@ fn attach(module: HMODULE) {
     }
     if !enabled {
         info!("loader disabled, skipping");
-        return;
+        return false;
     }
     *config::MOD_CONFIGS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) =
         Some(ModConfigs::new(root.join("config")));
     let _ = SETUP.set(Setup { root, config });
-    let player = unsafe { GetModuleHandleW(sys::wide("UnityPlayer.dll").as_ptr()) };
-    let target = if player.is_null() {
-        unsafe { GetModuleHandleW(std::ptr::null()) }
-    } else {
-        player
-    };
-    match unsafe {
-        iat::hook(
-            target,
-            "kernel32.dll",
-            "GetProcAddress",
-            get_proc_address_hook as *const () as usize,
-        )
-    } {
-        Some(_) => info!("GetProcAddress hooked"),
-        None => error!("failed to hook GetProcAddress"),
-    }
+    true
+}
+
+#[cfg(unix)]
+pub(crate) fn active() -> bool {
+    SETUP.get().is_some()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn data_dir() -> PathBuf {
+    sys::exe_path().with_file_name(format!("{}_Data", game_name()))
+}
+
+#[cfg(target_os = "macos")]
+fn data_dir() -> PathBuf {
+    let exe = sys::exe_path();
+    exe.parent()
+        .and_then(Path::parent)
+        .map(|contents| contents.join("Resources").join("Data"))
+        .unwrap_or_default()
 }
 
 fn is_unity_player() -> bool {
-    let exe = sys::module_path(std::ptr::null_mut());
-    exe.file_stem().is_some_and(|stem| {
-        exe.with_file_name(format!("{}_Data", stem.to_string_lossy()))
-            .is_dir()
-    })
+    !game_name().is_empty() && data_dir().is_dir()
 }
 
 fn managed_dir() -> PathBuf {
-    let exe = sys::module_path(std::ptr::null_mut());
-    exe.with_file_name(format!("{}_Data", game_name()))
-        .join("Managed")
+    data_dir().join("Managed")
 }
 
 pub(crate) fn game_name() -> String {
-    sys::module_path(std::ptr::null_mut())
+    sys::exe_path()
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
-unsafe extern "system" fn get_proc_address_hook(module: HMODULE, name: *const u8) -> *mut c_void {
-    let real =
-        unsafe { GetProcAddress(module, name) }.map_or(std::ptr::null_mut(), |f| f as *mut c_void);
+#[cfg(windows)]
+unsafe extern "system" fn get_proc_address_hook(module: Module, name: *const u8) -> *mut c_void {
+    let real = unsafe { windows_sys::Win32::System::LibraryLoader::GetProcAddress(module, name) }
+        .map_or(std::ptr::null_mut(), |f| f as *mut c_void);
     if real.is_null() || (name as usize) <= 0xFFFF {
         return real;
     }
-    if unsafe { sys::c_bytes(name) } == b"mono_jit_init_version" {
+    intercept(module, unsafe { sys::c_bytes(name) }, real)
+}
+
+pub(crate) fn intercept(module: Module, name: &[u8], real: *mut c_void) -> *mut c_void {
+    if name == b"mono_jit_init_version" {
         ORIGINAL_JIT_INIT.store(real as usize, Ordering::SeqCst);
         MONO_MODULE.store(module as usize, Ordering::SeqCst);
         return jit_init_hook as *mut c_void;
     }
-    if let Some(hook) = patched::intercept(unsafe { sys::c_bytes(name) }, real) {
+    if let Some(hook) = patched::intercept(name, real) {
         return hook;
     }
-    if unsafe { sys::c_bytes(name) } == b"il2cpp_init" {
+    if name == b"il2cpp_init" {
         ORIGINAL_IL2CPP_INIT.store(real as usize, Ordering::SeqCst);
         IL2CPP_MODULE.store(module as usize, Ordering::SeqCst);
         return il2cpp_init_hook as *mut c_void;
@@ -193,7 +233,7 @@ unsafe extern "C" fn il2cpp_init_hook(domain_name: *const c_char) -> i32 {
         let Some(setup) = SETUP.get() else { return };
         info!("IL2CPP runtime initialized");
         il2cpp::boot(
-            IL2CPP_MODULE.load(Ordering::SeqCst) as HMODULE,
+            IL2CPP_MODULE.load(Ordering::SeqCst) as Module,
             setup.root.clone(),
             setup.config.clone(),
         );
@@ -208,13 +248,11 @@ fn enable_debugger() {
     let Some(setup) = SETUP.get().filter(|s| s.config.debug.enabled) else {
         return;
     };
-    let module = MONO_MODULE.load(Ordering::SeqCst) as HMODULE;
-    let (Some(parse), Some(debug_init)) = (unsafe {
-        (
-            GetProcAddress(module, c"mono_jit_parse_options".as_ptr().cast()),
-            GetProcAddress(module, c"mono_debug_init".as_ptr().cast()),
-        )
-    }) else {
+    let module = MONO_MODULE.load(Ordering::SeqCst) as Module;
+    let (Some(parse), Some(debug_init)) = (
+        sys::symbol(module, c"mono_jit_parse_options"),
+        sys::symbol(module, c"mono_debug_init"),
+    ) else {
         error!("this Mono build has no debugger support");
         return;
     };
@@ -257,7 +295,7 @@ unsafe extern "C" fn jit_init_hook(root: *const c_char, runtime: *const c_char) 
 
 fn boot() {
     let Some(setup) = SETUP.get() else { return };
-    let module = MONO_MODULE.load(Ordering::SeqCst) as HMODULE;
+    let module = MONO_MODULE.load(Ordering::SeqCst) as Module;
     let mono = match Mono::load(module) {
         Ok(m) => m,
         Err(missing) => {

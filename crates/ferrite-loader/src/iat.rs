@@ -5,9 +5,19 @@ use windows_sys::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, PAGE_READWRITE, 
 
 const DOS_MAGIC: u16 = 0x5A4D;
 const PE_MAGIC: u32 = 0x4550;
-const PE32_PLUS: u16 = 0x20B;
 const IMPORT_DESCRIPTOR_SIZE: usize = 20;
-const ORDINAL_FLAG: u64 = 1 << 63;
+
+#[cfg(target_pointer_width = "64")]
+const OPTIONAL_MAGIC: u16 = 0x20B;
+#[cfg(target_pointer_width = "64")]
+const IMPORT_DIRECTORY: usize = 120;
+#[cfg(target_pointer_width = "32")]
+const OPTIONAL_MAGIC: u16 = 0x10B;
+#[cfg(target_pointer_width = "32")]
+const IMPORT_DIRECTORY: usize = 104;
+
+const THUNK_SIZE: usize = size_of::<usize>();
+const ORDINAL_FLAG: usize = 1 << (usize::BITS - 1);
 
 unsafe fn read<T: Copy>(addr: usize) -> T {
     unsafe { std::ptr::read_unaligned(addr as *const T) }
@@ -23,10 +33,10 @@ pub unsafe fn hook(module: HMODULE, dll: &str, func: &str, replacement: usize) -
         return None;
     }
     let optional = nt + 24;
-    if unsafe { read::<u16>(optional) } != PE32_PLUS {
+    if unsafe { read::<u16>(optional) } != OPTIONAL_MAGIC {
         return None;
     }
-    let import_rva = unsafe { read::<u32>(optional + 120) } as usize;
+    let import_rva = unsafe { read::<u32>(optional + IMPORT_DIRECTORY) } as usize;
     if import_rva == 0 {
         return None;
     }
@@ -54,23 +64,31 @@ unsafe fn find_slot(base: usize, names: usize, slots: usize, func: &str) -> Opti
     }
     (0..)
         .map_while(|i| {
-            let thunk = unsafe { read::<u64>(base + names + i * 8) };
+            let thunk = unsafe { read::<usize>(base + names + i * THUNK_SIZE) };
             (thunk != 0).then_some((i, thunk))
         })
         .filter(|&(_, thunk)| thunk & ORDINAL_FLAG == 0)
         .find(|&(_, thunk)| {
-            let by_name = base + usize::try_from(thunk & 0x7FFF_FFFF).unwrap_or_default() + 2;
+            let by_name = base + (thunk & 0x7FFF_FFFF) + 2;
             (unsafe { sys::c_bytes(by_name as *const u8) }) == func.as_bytes()
         })
-        .map(|(i, _)| (base + slots + i * 8) as *mut usize)
+        .map(|(i, _)| (base + slots + i * THUNK_SIZE) as *mut usize)
 }
 
 unsafe fn patch(slot: *mut usize, replacement: usize) -> Option<usize> {
     let mut old: PAGE_PROTECTION_FLAGS = 0;
-    if unsafe { VirtualProtect(slot.cast::<c_void>(), 8, PAGE_READWRITE, &raw mut old) } == 0 {
+    if unsafe {
+        VirtualProtect(
+            slot.cast::<c_void>(),
+            THUNK_SIZE,
+            PAGE_READWRITE,
+            &raw mut old,
+        )
+    } == 0
+    {
         return None;
     }
     let previous = unsafe { slot.replace(replacement) };
-    unsafe { VirtualProtect(slot.cast::<c_void>(), 8, old, &raw mut old) };
+    unsafe { VirtualProtect(slot.cast::<c_void>(), THUNK_SIZE, old, &raw mut old) };
     Some(previous)
 }
