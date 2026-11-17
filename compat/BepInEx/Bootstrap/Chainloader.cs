@@ -49,14 +49,19 @@ namespace BepInEx.Bootstrap {
                 dirs.Add(bepinex);
             }
             AppDomain.CurrentDomain.AssemblyResolve += Resolve;
-            var candidates = dirs.SelectMany(Scan).ToList();
+            var candidates = Scan(dirs);
             ManagerObject = new GameObject("BepInEx_Manager") { hideFlags = HideFlags.HideAndDontSave };
             UnityEngine.Object.DontDestroyOnLoad(ManagerObject);
             ThreadingHelper.Initialize(ManagerObject);
             var loaded = 0;
             foreach (var candidate in Order(candidates)) {
-                if (Load(candidate)) {
-                    loaded++;
+                try {
+                    if (Load(candidate)) {
+                        loaded++;
+                    }
+                } catch (Exception e) {
+                    PluginInfos.Remove(candidate.Guid);
+                    log.Error($"{candidate} failed to load: {Describe(e)}");
                 }
             }
             Ferrite.Commands.Register("plugins", "Lists BepInEx plugins.", _ => {
@@ -86,70 +91,89 @@ namespace BepInEx.Bootstrap {
             public override string ToString() => $"{Name} {VersionText} ({Guid})";
         }
 
-        static IEnumerable<Candidate> Scan(string dir) {
+        static List<Candidate> Scan(List<string> dirs) {
+            var resolver = new DefaultAssemblyResolver();
+            foreach (var dir in new[] { Paths.BepInExAssemblyDirectory, Paths.ManagedPath }.Concat(dirs).Concat(dirs.SelectMany(d => Directory.GetDirectories(d, "*", SearchOption.AllDirectories)))) {
+                resolver.AddSearchDirectory(dir);
+            }
+            var parameters = new ReaderParameters { AssemblyResolver = resolver };
             var loadedNames = new HashSet<string>(AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetName().Name), StringComparer.OrdinalIgnoreCase);
-            foreach (var file in Directory.GetFiles(dir, "*.dll", SearchOption.AllDirectories)) {
-                AssemblyDefinition assembly;
-                try {
-                    assembly = AssemblyDefinition.ReadAssembly(new MemoryStream(File.ReadAllBytes(file)));
-                } catch (Exception) {
-                    log.Debug($"skipping {file}: not a .NET assembly");
-                    continue;
-                }
-                using (assembly) {
-                    var name = assembly.Name.Name;
-                    if (loadedNames.Contains(name)) {
-                        log.Debug($"skipping {file}: {name} is already loaded");
-                        continue;
-                    }
-                    if (!libraries.ContainsKey(name)) {
-                        libraries[name] = file;
-                    }
-                    foreach (var type in assembly.MainModule.Types) {
-                        if (!type.IsClass || type.IsAbstract || type.IsInterface) {
-                            continue;
-                        }
-                        var plugin = type.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "BepInEx.BepInPlugin");
-                        if (plugin == null || plugin.ConstructorArguments.Count != 3) {
-                            continue;
-                        }
-                        var c = new Candidate {
-                            Guid = plugin.ConstructorArguments[0].Value as string,
-                            Name = plugin.ConstructorArguments[1].Value as string,
-                            VersionText = plugin.ConstructorArguments[2].Value as string,
-                            TypeName = type.FullName,
-                            File = file,
-                        };
-                        if (string.IsNullOrEmpty(c.Guid)) {
-                            log.Error($"{type.FullName} in {file} has an empty GUID, skipped");
-                            continue;
-                        }
-                        c.Name = string.IsNullOrEmpty(c.Name) ? c.Guid : c.Name;
-                        c.Version = BepInPlugin.ParseVersion(c.VersionText) ?? new Version();
-                        foreach (var attr in type.CustomAttributes) {
-                            var args = attr.ConstructorArguments;
-                            switch (attr.AttributeType.FullName) {
-                                case "BepInEx.BepInDependency":
-                                    var guid = args[0].Value as string;
-                                    if (args.Count > 1 && args[1].Value is string min) {
-                                        c.Dependencies.Add((guid, true, BepInPlugin.ParseVersion(min) ?? new Version()));
-                                    } else {
-                                        var flags = args.Count > 1 ? Convert.ToInt32(args[1].Value) : 1;
-                                        c.Dependencies.Add((guid, (flags & 1) != 0, new Version()));
-                                    }
-                                    break;
-                                case "BepInEx.BepInIncompatibility":
-                                    c.Incompatibilities.Add(args[0].Value as string);
-                                    break;
-                                case "BepInEx.BepInProcess":
-                                    c.Processes.Add(args[0].Value as string);
-                                    break;
-                            }
-                        }
-                        yield return c;
+            var result = new List<Candidate>();
+            using (resolver) {
+                foreach (var file in dirs.SelectMany(d => Directory.GetFiles(d, "*.dll", SearchOption.AllDirectories))) {
+                    try {
+                        result.AddRange(Scan(file, parameters, loadedNames));
+                    } catch (Exception e) {
+                        log.Error($"cannot read plugins from {file}: {e.Message}");
                     }
                 }
             }
+            return result;
+        }
+
+        static List<Candidate> Scan(string file, ReaderParameters parameters, HashSet<string> loadedNames) {
+            var result = new List<Candidate>();
+            AssemblyDefinition assembly;
+            try {
+                assembly = AssemblyDefinition.ReadAssembly(new MemoryStream(File.ReadAllBytes(file)), parameters);
+            } catch (BadImageFormatException) {
+                log.Debug($"skipping {file}: not a .NET assembly");
+                return result;
+            }
+            using (assembly) {
+                var name = assembly.Name.Name;
+                if (loadedNames.Contains(name)) {
+                    log.Debug($"skipping {file}: {name} is already loaded");
+                    return result;
+                }
+                if (!libraries.ContainsKey(name)) {
+                    libraries[name] = file;
+                }
+                foreach (var type in assembly.MainModule.Types) {
+                    if (!type.IsClass || type.IsAbstract || type.IsInterface) {
+                        continue;
+                    }
+                    var plugin = type.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "BepInEx.BepInPlugin");
+                    if (plugin == null || plugin.ConstructorArguments.Count != 3) {
+                        continue;
+                    }
+                    var c = new Candidate {
+                        Guid = plugin.ConstructorArguments[0].Value as string,
+                        Name = plugin.ConstructorArguments[1].Value as string,
+                        VersionText = plugin.ConstructorArguments[2].Value as string,
+                        TypeName = type.FullName,
+                        File = file,
+                    };
+                    if (string.IsNullOrEmpty(c.Guid)) {
+                        log.Error($"{type.FullName} in {file} has an empty GUID, skipped");
+                        continue;
+                    }
+                    c.Name = string.IsNullOrEmpty(c.Name) ? c.Guid : c.Name;
+                    c.Version = BepInPlugin.ParseVersion(c.VersionText) ?? new Version();
+                    foreach (var attr in type.CustomAttributes) {
+                        var args = attr.ConstructorArguments;
+                        switch (attr.AttributeType.FullName) {
+                            case "BepInEx.BepInDependency":
+                                var guid = args[0].Value as string;
+                                if (args.Count > 1 && args[1].Value is string min) {
+                                    c.Dependencies.Add((guid, true, BepInPlugin.ParseVersion(min) ?? new Version()));
+                                } else {
+                                    var flags = args.Count > 1 ? Convert.ToInt32(args[1].Value) : 1;
+                                    c.Dependencies.Add((guid, (flags & 1) != 0, new Version()));
+                                }
+                                break;
+                            case "BepInEx.BepInIncompatibility":
+                                c.Incompatibilities.Add(args[0].Value as string);
+                                break;
+                            case "BepInEx.BepInProcess":
+                                c.Processes.Add(args[0].Value as string);
+                                break;
+                        }
+                    }
+                    result.Add(c);
+                }
+            }
+            return result;
         }
 
         static List<Candidate> Order(List<Candidate> all) {

@@ -104,6 +104,20 @@ public sealed class HelloMod : Mod {
 - `Harmony` is a per-mod Harmony instance with the mod id.
 - Dependencies ending with `?` are optional.
 
+## BepInEx 5 plugins (optional)
+
+Mono games can also run existing BepInEx 5 plugins through a separate compatibility package. The core does not need it: without `Ferrite\core\BepInEx.dll` the loader behaves as before.
+
+1. Copy `dist\bepinex-compat\Ferrite` over the game's `Ferrite` folder (adds `core\BepInEx.dll`), or build with `build.ps1 -Install <game> -BepInEx`.
+2. Put plugins into `Ferrite\plugins` (subfolders allowed). A `BepInEx\plugins` folder next to the game exe is also scanned. Do not keep real BepInEx (`winhttp.dll`) active at the same time.
+
+- `BepInEx.dll` has the same name, version (5.4.23.2) and public API as BepInEx 5: `BaseUnityPlugin`, `BepInPlugin`/`BepInDependency`/`BepInIncompatibility`/`BepInProcess`, `Logging`, `Configuration` (including `KeyboardShortcut` and `TomlTypeConverter`), `Paths`, `Chainloader.PluginInfos`, `Utility`, `ThreadingHelper`. Harmony is the one in `Ferrite\core`.
+- Plugins start right after Ferrite mods, in dependency order, as components of a hidden `BepInEx_Manager` object (DontDestroyOnLoad). Missing hard dependencies, too old versions, incompatibilities, `BepInProcess` filters and duplicate GUIDs are handled like BepInEx.
+- Logs go to the Ferrite log and console under the plugin name. Configs are BepInEx `.cfg` files in `Ferrite\config\<GUID>.cfg`, so existing BepInEx configs can be copied over. They are not shown in the menu and are not reloaded while the game runs.
+- `Paths.BepInExRootPath` is the `Ferrite` folder (`plugins`, `config`, `patchers`, `cache`, `core` under it).
+- Plugins are listed in the menu with a `BepInEx` tag and by the `plugins` command. A plugin that throws in `Awake` is marked faulted. "Disable on next start" works (GUID in `[mods] disabled`); hot reload does not.
+- Not supported: BepInEx preloader patchers, Harmony 1 plugins (`HarmonyXInterop`), the new Input System for `KeyboardShortcut`, IL2CPP (BepInEx 6). See `examples/HelloBepInEx`.
+
 ## IL2CPP mods (Rust)
 
 In IL2CPP games the C# code is compiled to native code, so mods are native libraries. Create a `cdylib` crate that depends on `ferrite-sdk`. See `examples/hello-native`.
