@@ -26,7 +26,11 @@ public static class GameWindow {
     [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hwnd, ref POINT p);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
-    [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, IntPtr extra);
 
     public static IntPtr Find(uint pid) {
         IntPtr found = IntPtr.Zero;
@@ -51,14 +55,15 @@ public static class GameWindow {
         var p = new POINT { X = x, Y = y };
         ClientToScreen(game, ref p);
         var target = WindowFromPoint(p);
-        var local = p;
-        ScreenToClient(target, ref local);
-        var lp = (IntPtr)((local.Y << 16) | (local.X & 0xFFFF));
-        PostMessageW(target, 0x0200, IntPtr.Zero, lp);
+        POINT saved;
+        GetCursorPos(out saved);
+        SetCursorPos(p.X, p.Y);
+        System.Threading.Thread.Sleep(100);
+        mouse_event(0x0002, 0, 0, 0, IntPtr.Zero);
         System.Threading.Thread.Sleep(80);
-        PostMessageW(target, 0x0201, (IntPtr)1, lp);
-        System.Threading.Thread.Sleep(80);
-        PostMessageW(target, 0x0202, IntPtr.Zero, lp);
+        mouse_event(0x0004, 0, 0, 0, IntPtr.Zero);
+        System.Threading.Thread.Sleep(100);
+        SetCursorPos(saved.X, saved.Y);
         var cls = new StringBuilder(64);
         GetClassNameW(target, cls, 64);
         return cls.ToString();
@@ -74,6 +79,11 @@ if ($hwnd -eq [IntPtr]::Zero) { throw "no Unity window in $Process" }
 $topmost = [IntPtr](-1)
 $notopmost = [IntPtr](-2)
 $flags = 0x0001 -bor 0x0002 -bor 0x0010
+$minimized = [GameWindow]::IsIconic($hwnd)
+if ($minimized) {
+    [GameWindow]::ShowWindow($hwnd, 4) | Out-Null
+    Start-Sleep -Milliseconds 800
+}
 [GameWindow]::SetWindowPos($hwnd, $topmost, 0, 0, 0, 0, $flags) | Out-Null
 try {
     Start-Sleep -Milliseconds 400
@@ -97,4 +107,7 @@ try {
     Write-Host "captured ${w}x${h} -> $Out"
 } finally {
     [GameWindow]::SetWindowPos($hwnd, $notopmost, 0, 0, 0, 0, $flags) | Out-Null
+    if ($minimized) {
+        [GameWindow]::ShowWindow($hwnd, 7) | Out-Null
+    }
 }

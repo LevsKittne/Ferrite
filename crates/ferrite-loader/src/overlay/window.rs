@@ -24,11 +24,12 @@ use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetClientRect,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, MA_NOACTIVATE, MSG, PM_REMOVE,
-    PeekMessageW, RegisterClassExW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetWindowPos,
-    ShowWindow, TranslateMessage, WM_MOUSEACTIVATE, WNDCLASSEXW, WS_EX_NOACTIVATE,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_HWNDPREV, GWL_EXSTYLE,
+    GetClassNameW, GetClientRect, GetWindow, GetWindowLongW, GetWindowThreadProcessId, HWND_TOP,
+    HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible, MA_NOACTIVATE, MSG, PM_REMOVE, PeekMessageW,
+    RegisterClassExW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SetWindowPos, ShowWindow, TranslateMessage, WM_MOUSEACTIVATE, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::BOOL;
 use windows::core::{Interface, w};
@@ -163,6 +164,35 @@ fn client_rect(game: HWND) -> Option<(i32, i32, u32, u32)> {
     }
 }
 
+fn keep_above(hwnd: HWND, game: HWND) {
+    unsafe {
+        let mut prev = GetWindow(game, GW_HWNDPREV).ok();
+        if prev == Some(hwnd) {
+            return;
+        }
+        let mut seen = prev;
+        while let Some(w) = seen {
+            if w == hwnd {
+                return;
+            }
+            seen = GetWindow(w, GW_HWNDPREV).ok();
+        }
+        if prev.is_none() {
+            let topmost = GetWindowLongW(game, GWL_EXSTYLE).cast_unsigned() & WS_EX_TOPMOST.0 != 0;
+            prev = Some(if topmost { HWND_TOPMOST } else { HWND_TOP });
+        }
+        let _ = SetWindowPos(
+            hwnd,
+            prev,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+}
+
 fn pump() {
     let mut msg = MSG::default();
     unsafe {
@@ -279,6 +309,7 @@ fn run() -> Result<(), String> {
             }
             shown = true;
         }
+        keep_above(hwnd, game);
         let Ok(back) = (unsafe { g.swapchain.GetBuffer::<ID3D11Texture2D>(0) }) else {
             continue;
         };
