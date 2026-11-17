@@ -2,6 +2,7 @@ mod config;
 mod console;
 mod deps;
 mod detour;
+mod dotnet;
 mod iat;
 mod il2cpp;
 mod log;

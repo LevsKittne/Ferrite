@@ -1,6 +1,7 @@
 use crate::config::{self, Kind};
 use crate::console;
 use crate::deps::{self, Catalog, Dependency, Node};
+use crate::dotnet;
 use crate::log::{self, Level, error, info, warning};
 use crate::sys;
 use ferrite_sdk::abi::{
@@ -24,9 +25,11 @@ struct Entry {
     name: String,
     version: String,
     dependencies: Vec<Dependency>,
+    author: String,
     file: PathBuf,
     module: usize,
     abi: u32,
+    managed: bool,
 }
 
 impl Node for Entry {
@@ -60,11 +63,13 @@ struct Loaded {
     id: String,
     name: String,
     version: String,
+    author: String,
     file: PathBuf,
     module: usize,
     stamp: Option<SystemTime>,
     callbacks: Callbacks,
     active: bool,
+    managed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +205,38 @@ fn open_library(file: &Path) -> Option<HMODULE> {
     (!module.is_null()).then_some(module)
 }
 
+fn free(module: usize, managed: bool) {
+    if managed {
+        dotnet::release(module);
+    } else {
+        unsafe { FreeLibrary(module as HMODULE) };
+    }
+}
+
+fn inspect_managed(file: &Path) -> Option<Entry> {
+    let info = dotnet::inspect(file)?;
+    if info.id.is_empty() {
+        error!("{} has an empty mod id, skipped", file.display());
+        dotnet::release(info.token);
+        return None;
+    }
+    Some(Entry {
+        id: info.id,
+        name: info.name,
+        version: info.version,
+        author: info.author,
+        dependencies: Dependency::parse_list(&info.dependencies),
+        file: file.to_path_buf(),
+        module: info.token,
+        abi: abi::ABI_VERSION,
+        managed: true,
+    })
+}
+
 fn inspect(file: &Path) -> Option<Entry> {
+    if dotnet::is_managed(file) {
+        return inspect_managed(file);
+    }
     let Some(module) = open_library(file) else {
         warning!("cannot load {}", file.display());
         return None;
@@ -235,9 +271,11 @@ fn inspect(file: &Path) -> Option<Entry> {
         version: unsafe { read_cstr(info.version) },
         dependencies: Dependency::parse_list(&unsafe { read_cstr(info.dependencies) }),
         id,
+        author: String::new(),
         file: file.to_path_buf(),
         module: module as usize,
         abi: info.abi,
+        managed: false,
     })
 }
 
@@ -254,21 +292,23 @@ pub fn load_all(root: &Path, mods_dir: &Path, disabled: &[String], hot_reload: b
         cache,
         hot_reload,
     });
+    dotnet::configure(root, &raw const API);
     let started = Instant::now();
     let mut catalog = Catalog::new(disabled, &crate::game_name());
     let mut modules = Vec::new();
     for file in deps::dlls(mods_dir) {
         if let Some(entry) = inspect(&file) {
-            modules.push(entry.module);
+            modules.push((entry.module, entry.managed));
             catalog.add(entry);
         }
     }
     let ordered = catalog.ordered();
-    for module in modules
-        .into_iter()
-        .filter(|m| !ordered.iter().any(|e| e.module == *m))
-    {
-        unsafe { FreeLibrary(module as HMODULE) };
+    for (module, managed) in modules.into_iter().filter(|(m, managed)| {
+        !ordered
+            .iter()
+            .any(|e| e.module == *m && e.managed == *managed)
+    }) {
+        free(module, managed);
     }
     for entry in ordered {
         load(&entry, None);
@@ -276,7 +316,7 @@ pub fn load_all(root: &Path, mods_dir: &Path, disabled: &[String], hot_reload: b
     report();
     let count = lock(&MODS).iter().filter(|m| m.active).count();
     info!(
-        "{count} native mod(s) loaded in {} ms{}",
+        "{count} mod(s) loaded in {} ms{}",
         started.elapsed().as_millis(),
         if hot_reload { ", hot reload on" } else { "" }
     );
@@ -289,7 +329,11 @@ fn export<T>(module: HMODULE, name: &[u8]) -> Option<T> {
 
 fn load(entry: &Entry, slot: Option<usize>) -> bool {
     let module = entry.module as HMODULE;
-    let Some(load_fn) = export::<LoadFn>(module, abi::LOAD_SYMBOL) else {
+    let load_fn = if entry.managed {
+        None
+    } else if let Some(f) = export::<LoadFn>(module, abi::LOAD_SYMBOL) {
+        Some(f)
+    } else {
         error!("{} has no ferrite_mod_load export, skipped", entry.id);
         unsafe { FreeLibrary(module) };
         return false;
@@ -298,11 +342,13 @@ fn load(entry: &Entry, slot: Option<usize>) -> bool {
         id: entry.id.clone(),
         name: entry.name.clone(),
         version: entry.version.clone(),
+        author: entry.author.clone(),
         file: entry.file.clone(),
         module: entry.module,
         stamp: stamp(&entry.file),
         callbacks: Callbacks::default(),
         active: false,
+        managed: entry.managed,
     };
     let handle = {
         let mut mods = lock(&MODS);
@@ -326,12 +372,20 @@ fn load(entry: &Entry, slot: Option<usize>) -> bool {
     } else {
         &raw const API_V1
     };
-    if unsafe { load_fn(api, handle as Handle) } {
-        let callbacks = Callbacks {
-            update: export(module, abi::UPDATE_SYMBOL),
-            scene: export(module, abi::SCENE_SYMBOL),
-            unload: export(module, abi::UNLOAD_SYMBOL),
-            config: export(module, abi::CONFIG_SYMBOL),
+    let ok = match load_fn {
+        Some(f) => unsafe { f(api, handle as Handle) },
+        None => dotnet::load(entry.module, handle),
+    };
+    if ok {
+        let callbacks = if entry.managed {
+            Callbacks::default()
+        } else {
+            Callbacks {
+                update: export(module, abi::UPDATE_SYMBOL),
+                scene: export(module, abi::SCENE_SYMBOL),
+                unload: export(module, abi::UNLOAD_SYMBOL),
+                config: export(module, abi::CONFIG_SYMBOL),
+            }
         };
         if let Some(m) = lock(&MODS).get_mut(handle - 1) {
             m.callbacks = callbacks;
@@ -380,17 +434,21 @@ fn release(handle: usize) {
     let module = lock(&MODS).get_mut(handle - 1).map(|m| {
         m.active = false;
         m.callbacks = Callbacks::default();
-        std::mem::take(&mut m.module)
+        (std::mem::take(&mut m.module), m.managed)
     });
-    if let Some(module) = module.filter(|&m| m != 0) {
-        unsafe { FreeLibrary(module as HMODULE) };
+    if let Some((module, managed)) = module.filter(|&(m, _)| m != 0) {
+        free(module, managed);
     }
 }
 
 fn unload(handle: usize) {
-    let unload = lock(&MODS).get(handle - 1).and_then(|m| m.callbacks.unload);
-    if let Some(f) = unload {
-        unsafe { f() };
+    let target = lock(&MODS)
+        .get(handle - 1)
+        .map(|m| (m.managed, m.module, m.callbacks.unload));
+    match target {
+        Some((true, module, _)) if module != 0 => dotnet::unload(module),
+        Some((false, _, Some(f))) => unsafe { f() },
+        _ => {}
     }
     release(handle);
 }
@@ -400,13 +458,13 @@ pub fn reload(id: &str) -> bool {
         let mods = lock(&MODS);
         mods.iter()
             .position(|m| m.id.eq_ignore_ascii_case(id) && m.module != 0)
-            .map(|i| (i, mods[i].file.clone()))
+            .map(|i| (i, mods[i].file.clone(), mods[i].managed))
     };
-    let Some((index, file)) = found else {
-        warning!("native mod {id} is not loaded");
+    let Some((index, file, managed)) = found else {
+        warning!("mod {id} is not loaded");
         return false;
     };
-    if !DIRS.get().is_some_and(|d| d.hot_reload) {
+    if !managed && !DIRS.get().is_some_and(|d| d.hot_reload) {
         warning!(
             "set hot_reload = true in [mods] of ferrite.toml to reload native mods, the dll is locked otherwise"
         );
@@ -418,7 +476,7 @@ pub fn reload(id: &str) -> bool {
     };
     if !entry.id.eq_ignore_ascii_case(id) {
         error!("cannot reload {id}: the new build has id {}", entry.id);
-        unsafe { FreeLibrary(entry.module as HMODULE) };
+        free(entry.module, entry.managed);
         return false;
     }
     let ok = load(&entry, Some(index));
@@ -429,20 +487,27 @@ pub fn reload(id: &str) -> bool {
     ok
 }
 
+fn kind(managed: bool) -> &'static str {
+    if managed { "C#" } else { "Rust" }
+}
+
 fn report() {
-    let rows = lock(&MODS)
-        .iter()
-        .filter(|m| m.active)
-        .map(|m| crate::overlay::ModRow {
-            id: m.id.clone(),
-            name: m.name.clone(),
-            version: m.version.clone(),
-            author: String::new(),
-            kind: "Rust",
-            faulted: false,
-        })
-        .collect();
-    crate::overlay::set_mods("Rust", rows);
+    let mods = lock(&MODS).clone();
+    for managed in [false, true] {
+        let rows = mods
+            .iter()
+            .filter(|m| m.active && m.managed == managed)
+            .map(|m| crate::overlay::ModRow {
+                id: m.id.clone(),
+                name: m.name.clone(),
+                version: m.version.clone(),
+                author: m.author.clone(),
+                kind: kind(managed),
+                faulted: false,
+            })
+            .collect();
+        crate::overlay::set_mods(kind(managed), rows);
+    }
 }
 
 fn check_reloads() {
@@ -472,13 +537,20 @@ fn check_reloads() {
 fn notify_configs() {
     let changed = config::with_mod_configs(config::ModConfigs::poll).unwrap_or_default();
     for id in changed {
-        let callback = lock(&MODS)
+        let target = lock(&MODS)
             .iter()
             .find(|m| m.active && m.id.eq_ignore_ascii_case(&id))
-            .and_then(|m| m.callbacks.config);
-        if let Some(f) = callback {
-            info!("config of {id} changed");
-            unsafe { f() };
+            .map(|m| (m.managed, m.module, m.callbacks.config));
+        match target {
+            Some((true, module, _)) => {
+                info!("config of {id} changed");
+                dotnet::config_changed(module);
+            }
+            Some((false, _, Some(f))) => {
+                info!("config of {id} changed");
+                unsafe { f() };
+            }
+            _ => {}
         }
     }
 }
@@ -487,24 +559,32 @@ pub fn tick() {
     poll_commands();
     notify_configs();
     check_reloads();
-    let updates: Vec<UpdateFn> = lock(&MODS)
+    let updates: Vec<(bool, usize, Option<UpdateFn>)> = lock(&MODS)
         .iter()
         .filter(|m| m.active)
-        .filter_map(|m| m.callbacks.update)
+        .map(|m| (m.managed, m.module, m.callbacks.update))
         .collect();
-    for update in updates {
-        unsafe { update() };
+    for (managed, module, update) in updates {
+        if managed {
+            dotnet::update(module);
+        } else if let Some(update) = update {
+            unsafe { update() };
+        }
     }
 }
 
 pub fn scene_loaded(name: &str) {
-    let scenes: Vec<SceneFn> = lock(&MODS)
+    let scenes: Vec<(bool, usize, Option<SceneFn>)> = lock(&MODS)
         .iter()
         .filter(|m| m.active)
-        .filter_map(|m| m.callbacks.scene)
+        .map(|m| (m.managed, m.module, m.callbacks.scene))
         .collect();
-    for scene in scenes {
-        unsafe { scene(name.as_ptr(), name.len()) };
+    for (managed, module, scene) in scenes {
+        if managed {
+            dotnet::scene(module, name);
+        } else if let Some(scene) = scene {
+            unsafe { scene(name.as_ptr(), name.len()) };
+        }
     }
 }
 
@@ -566,11 +646,17 @@ fn mods() {
     let mods = lock(&MODS).clone();
     let active = mods.iter().filter(|m| m.active).count();
     print(&format!(
-        "Ferrite {}, {active} native mod(s):",
+        "Ferrite {}, {active} mod(s):",
         env!("CARGO_PKG_VERSION")
     ));
     for m in mods.iter().filter(|m| m.active) {
-        print(&format!("  {} {} ({})", m.name, m.version, m.id));
+        print(&format!(
+            "  {} {} ({}, {})",
+            m.name,
+            m.version,
+            m.id,
+            kind(m.managed)
+        ));
     }
 }
 
