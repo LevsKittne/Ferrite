@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Optional BepInEx 5 compatibility package (`compat/BepInEx`, `dist\bepinex-compat`): runs BepInEx 5 plugins from `Ferrite\plugins` and `BepInEx\plugins` in Mono games, with BepInEx `.cfg` configs and plugins shown in the menu. Example: `examples/HelloBepInEx`.
+
 ## [0.2.1] - 2026-11-16
 
 ### Added
