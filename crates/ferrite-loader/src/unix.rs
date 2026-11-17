@@ -73,6 +73,7 @@ fn default_root(game_dir: &std::path::Path) -> PathBuf {
     game_dir.join(crate::ROOT_DIR)
 }
 
+#[cfg(target_os = "linux")]
 type DlsymFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void;
 
 #[cfg(target_os = "linux")]

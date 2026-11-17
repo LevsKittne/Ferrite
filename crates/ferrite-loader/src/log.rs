@@ -306,6 +306,7 @@ mod terminal {
     #[derive(Debug, Clone, Copy)]
     pub struct Console;
 
+    #[allow(clippy::unnecessary_wraps)]
     pub fn open(title: &str) -> Option<Console> {
         let _ = write!(std::io::stderr(), "\x1b]0;{title}\x07");
         std::thread::Builder::new()

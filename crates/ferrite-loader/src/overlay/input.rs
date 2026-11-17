@@ -78,7 +78,8 @@ pub unsafe fn install(hwnd: HWND) {
     if OLD_PROC.load(Ordering::SeqCst) != 0 {
         return;
     }
-    let old = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc as *const () as isize) };
+    #[allow(clippy::unnecessary_cast)]
+    let old = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc as *const () as _) } as isize;
     OLD_PROC.store(old, Ordering::SeqCst);
 }
 
